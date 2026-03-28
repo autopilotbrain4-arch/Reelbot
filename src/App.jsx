@@ -212,7 +212,10 @@ const TYPE_COL  = { film:C.accent, serie:C.blue, gioco:C.green };
 const TYPE_CHAR = { film:"F", serie:"S", gioco:"G" };
 const STATUS_CH = { finito:"[OK]", "in corso":"[...]", abbandonato:"[--]" };
 
-const WELCOME = "Ciao. Sono REELBOT.\nПривет. Я REELBOT.\n\nDimmi cosa hai guardato, che umore hai, o usa Vision.\nСкажи что смотрела, какое настроение, или используй Vision.\n\n**ADAM** → italiano / **KIRA** → русский";
+const WELCOME = {
+  tu:  "Ciao Adam. Sono REELBOT.\n\nDimmi cosa hai guardato o giocato di recente, oppure chiedimi consigli. Usa **Vision** per analizzare screenshot da film e giochi.",
+  lei: "Привет, Кира. Я REELBOT.\n\nРасскажи что недавно смотрела или играла, или попроси совет. Используй **Vision** для анализа скриншотов из фильмов и игр.",
+};
 
 /* ─── API KEY ────────────────────────────────────────── */
 const API_KEY_STORAGE = "reelbot_apikey";
@@ -220,33 +223,46 @@ function getApiKey() { return import.meta.env.VITE_ANTHROPIC_KEY || ""; }
 function setApiKey(k) {}
 
 /* ─── API LAYER ──────────────────────────────────────── */
-async function callClaude({ system, messages, withSearch=false, maxTokens=1200, onStatus }) {
+async function callClaude({ system, messages, withSearch=false, maxTokens=1400, onStatus }) {
   const apiKey = getApiKey();
   const body = {
     model:"claude-sonnet-4-20250514", max_tokens:maxTokens, messages,
     ...(system?{system}:{}),
-    ...(withSearch?{tools:[{type:"web_search_20250305",name:"web_search"}]}:{}),
+    ...(withSearch?{tools:[{type:"web_search_20250305",name:"web_search"}],tool_choice:{type:"auto"}}:{}),
   };
   const attempt = async () => {
     const ctrl = new AbortController();
-    const timer = setTimeout(()=>ctrl.abort(), 35000);
+    const timer = setTimeout(()=>ctrl.abort(), 55000); // longer timeout for searches
     try {
-      const headers = {"Content-Type":"application/json","anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"};
+      const headers = {
+        "Content-Type":"application/json",
+        "anthropic-version":"2023-06-01",
+        "anthropic-dangerous-direct-browser-access":"true",
+        "anthropic-beta":"interleaved-thinking-2025-05-14",
+      };
       if (apiKey) headers["x-api-key"] = apiKey;
       const r = await fetch("https://api.anthropic.com/v1/messages", {
         method:"POST", signal:ctrl.signal, headers, body:JSON.stringify(body),
       });
       clearTimeout(timer);
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      if (!r.ok) {
+        const errText = await r.text().catch(()=>"");
+        throw new Error(`HTTP ${r.status}: ${errText.substring(0,200)}`);
+      }
       const d = await r.json();
       if (d.error) throw new Error(d.error.message||"API error");
-      return (d.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("");
+      // Extract all text blocks including those after tool_use
+      const texts = (d.content||[])
+        .filter(b=>b.type==="text")
+        .map(b=>b.text)
+        .join("");
+      return texts;
     } catch(e) { clearTimeout(timer); throw e; }
   };
   onStatus?.("busy");
   try { const res=await attempt(); onStatus?.("ok"); return res; }
   catch {
-    await new Promise(r=>setTimeout(r,1500));
+    await new Promise(r=>setTimeout(r,2000));
     try { const res=await attempt(); onStatus?.("ok"); return res; }
     catch(e) { onStatus?.("error"); throw e; }
   }
@@ -284,8 +300,12 @@ const CHAT_SYS = (lang, profiles, mood, active, moods) => {
   const recentOther = otherProf.library.filter(i=>i.addedAt).sort((a,b)=>new Date(b.addedAt)-new Date(a.addedAt)).slice(0,5).map(i=>`- ${i.title}${i.rating?" (★"+i.rating+")":""}`).join("\n");
 
   const persona = isRu
-    ? `Ты REELBOT. Сейчас говоришь с КИРОЙ. Её партнёр — АДАМ. ВСЕГДА отвечай по-русски. Ироничный, остроумный, конкретный. Учитывай вкусы обоих. Не предлагай уже просмотренное. Когда это уместно, упоминай что делал Адам: "Адам уже смотрел это и поставил 8/10" или "Адам добавил это в вишлист — может посмотреть вместе?". Советы должны отражать ваши общие интересы как пары.`
-    : `Sei REELBOT. Stai parlando con ADAM. La sua partner è KIRA. Parla SEMPRE in italiano. Ironico, brillante, concreto. Considera i gusti di entrambi. Non riproporre titoli già visti. Quando rilevante, menziona le interazioni di Kira: "Kira ha già visto questo e l'ha votato 8/10" o "Kira lo ha in wishlist — potete guardarlo insieme!". I consigli devono riflettere i gusti comuni della coppia.`;
+    ? `Ты REELBOT. Говоришь с КИРОЙ. Её партнёр — АДАМ. ВСЕГДА отвечай по-русски. Ироничный, остроумный, конкретный.
+ПОИСК: Когда спрашивают о новостях, датах выхода, актёрах, обзорах или чём-то актуальном — ОБЯЗАТЕЛЬНО используй web_search. Ищи конкретно: название + год + "дата выхода" или "трейлер" или "новости". Включай реальные ссылки в ответ когда находишь.
+Учитывай вкусы обоих. Не предлагай уже просмотренное. Упоминай активность Адама когда уместно.`
+    : `Sei REELBOT. Parli con ADAM. La sua partner è KIRA. Parla SEMPRE in italiano. Ironico, brillante, concreto.
+RICERCA: Quando chiedono notizie, date di uscita, cast, recensioni o informazioni attuali — usa SEMPRE web_search. Cerca in modo specifico: titolo + anno + "data uscita" oppure "trailer" oppure "notizie". Includi link reali nella risposta quando li trovi.
+Considera i gusti di entrambi. Non riproporre titoli già visti. Menziona l'attività di Kira quando rilevante.`;
 
   const tag = isRu
     ? `Библиотека: [REEL:{"op":"add","dest":"library","profile":"tu|lei|entrambi","title":"НАЗВАНИЕ","type":"film|serie|gioco","status":"finito|in corso|abbandonato","genre":"horror|azione|commedia|thriller|fantasy|sci-fi|romantico|animazione|documentario|altro","rating":null,"hours":2}]
@@ -854,8 +874,8 @@ export default function ReelBot() {
     ]);
     if (prof) setProfiles(p=>({...DEF_PROF,...prof,tu:{...DEF_PROF.tu,...prof.tu,prefs:{...DEF_PREFS,...(prof.tu?.prefs||{})}},lei:{...DEF_PROF.lei,...prof.lei,prefs:{...DEF_PREFS,...(prof.lei?.prefs||{})}}}));
     setChats({
-      tu:  chatA?.length ? chatA : [{role:"assistant",content:WELCOME}],
-      lei: chatK?.length ? chatK : [{role:"assistant",content:WELCOME}],
+      tu:  chatA?.length ? chatA : [{role:"assistant",content:WELCOME.tu}],
+      lei: chatK?.length ? chatK : [{role:"assistant",content:WELCOME.lei}],
     });
     if (miss) setMissions(miss);
     setAuthed(false);
@@ -943,7 +963,7 @@ export default function ReelBot() {
   };
 
   const clearChat = () => {
-    const fresh=[{role:"assistant",content:WELCOME}];
+    const fresh=[{role:"assistant",content:WELCOME[active]}];
     setChats(prev=>({...prev,[active]:fresh}));
     stSet(chatKey(active), fresh);
     notify(t.chat_cleared);
