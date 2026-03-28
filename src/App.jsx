@@ -228,17 +228,16 @@ async function callClaude({ system, messages, withSearch=false, maxTokens=1400, 
   const body = {
     model:"claude-sonnet-4-20250514", max_tokens:maxTokens, messages,
     ...(system?{system}:{}),
-    ...(withSearch?{tools:[{type:"web_search_20250305",name:"web_search"}],tool_choice:{type:"auto"}}:{}),
+    ...(withSearch?{tools:[{type:"web_search_20250305",name:"web_search"}]}:{}),
   };
   const attempt = async () => {
     const ctrl = new AbortController();
-    const timer = setTimeout(()=>ctrl.abort(), 55000); // longer timeout for searches
+    const timer = setTimeout(()=>ctrl.abort(), 55000);
     try {
       const headers = {
         "Content-Type":"application/json",
         "anthropic-version":"2023-06-01",
         "anthropic-dangerous-direct-browser-access":"true",
-        "anthropic-beta":"interleaved-thinking-2025-05-14",
       };
       if (apiKey) headers["x-api-key"] = apiKey;
       const r = await fetch("https://api.anthropic.com/v1/messages", {
@@ -251,12 +250,7 @@ async function callClaude({ system, messages, withSearch=false, maxTokens=1400, 
       }
       const d = await r.json();
       if (d.error) throw new Error(d.error.message||"API error");
-      // Extract all text blocks including those after tool_use
-      const texts = (d.content||[])
-        .filter(b=>b.type==="text")
-        .map(b=>b.text)
-        .join("");
-      return texts;
+      return (d.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("");
     } catch(e) { clearTimeout(timer); throw e; }
   };
   onStatus?.("busy");
