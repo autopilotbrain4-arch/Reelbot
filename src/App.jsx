@@ -13,10 +13,11 @@ const SANS = "'Golos Text', sans-serif";
 
 /* ─── STORAGE KEYS ───────────────────────────────────── */
 const SK = {
-  profiles: "reelbot_v4_profiles",
-  chat:     "reelbot_v4_chat",
-  missions: "reelbot_v4_missions",
-  pins:     "reelbot_v4_pins",
+  profiles:  "reelbot_v4_profiles",
+  chat_adam: "reelbot_v4_chat_adam",
+  chat_kira: "reelbot_v4_chat_kira",
+  missions:  "reelbot_v4_missions",
+  pins:      "reelbot_v4_pins",
 };
 
 const MAX_CHAT_STORED = 60;
@@ -51,7 +52,26 @@ async function stSet(key, val) {
   } catch {}
 }
 
-/* ─── TRANSLATIONS ───────────────────────────────────── */
+/* ─── TMDB CONFIG ────────────────────────────────────── */
+const TMDB_KEY = "3808c106fa8d52adb5839faad1155f56";
+const TMDB_IMG = "https://image.tmdb.org/t/p/w300";
+
+async function fetchPoster(title, type) {
+  try {
+    const endpoint = type === "gioco"
+      ? null // TMDB non ha giochi, usiamo gradiente
+      : type === "serie"
+        ? `https://api.themoviedb.org/3/search/tv?api_key=${TMDB_KEY}&query=${encodeURIComponent(title)}&language=it-IT`
+        : `https://api.themoviedb.org/3/search/movie?api_key=${TMDB_KEY}&query=${encodeURIComponent(title)}&language=it-IT`;
+    if (!endpoint) return null;
+    const r = await fetch(endpoint);
+    const d = await r.json();
+    const path = d?.results?.[0]?.poster_path;
+    return path ? `${TMDB_IMG}${path}` : null;
+  } catch { return null; }
+}
+
+
 const TR = {
   it: {
     lang:"IT",
@@ -192,12 +212,12 @@ const TYPE_COL  = { film:C.accent, serie:C.blue, gioco:C.green };
 const TYPE_CHAR = { film:"F", serie:"S", gioco:"G" };
 const STATUS_CH = { finito:"[OK]", "in corso":"[...]", abbandonato:"[--]" };
 
-const WELCOME = "Ciao. Sono REELBOT.\nПривет. Я REELBOT.\n\nDimmi cosa hai guardato, che umore hai, o usa Vision.\nСкажи что смотрела, какое настроение, или используй Vision.\n\n**PER LUI** → italiano / **ДЛЯ НЕЁ** → русский";
+const WELCOME = "Ciao. Sono REELBOT.\nПривет. Я REELBOT.\n\nDimmi cosa hai guardato, che umore hai, o usa Vision.\nСкажи что смотрела, какое настроение, или используй Vision.\n\n**ADAM** → italiano / **KIRA** → русский";
 
-/* ─── API KEY MANAGEMENT ─────────────────────────────── */
+/* ─── API KEY ────────────────────────────────────────── */
 const API_KEY_STORAGE = "reelbot_apikey";
-function getApiKey() { try { return localStorage.getItem(API_KEY_STORAGE)||""; } catch { return ""; } }
-function setApiKey(k) { try { localStorage.setItem(API_KEY_STORAGE, k); } catch {} }
+function getApiKey() { return import.meta.env.VITE_ANTHROPIC_KEY || ""; }
+function setApiKey(k) {}
 
 /* ─── API LAYER ──────────────────────────────────────── */
 async function callClaude({ system, messages, withSearch=false, maxTokens=1200, onStatus }) {
@@ -254,19 +274,19 @@ function mdLight(text) {
 /* ─── PROMPTS ────────────────────────────────────────── */
 const CHAT_SYS = (lang, profiles, mood, active, moods) => {
   const isRu = lang==="ru";
-  const fmt = a => a.length ? a.map(i=>`- ${i.title} (${i.type}${i.status?", "+i.status:""}${i.rating?", "+i.rating+"/10":""})`).join("\n") : (isRu?"пусто":"vuota");
+  const myName = active==="tu" ? "Adam" : "Kira";
+  const otherName = active==="tu" ? "Kira" : "Adam";
+  const myProf = active==="tu" ? profiles.tu : profiles.lei;
+  const otherProf = active==="tu" ? profiles.lei : profiles.tu;
+  const fmt = a => a.length ? a.map(i=>`- ${i.title} (${i.type}${i.status?", "+i.status:""}${i.rating?", ★"+i.rating:""})`).join("\n") : (isRu?"пусто":"vuota");
   const moodHint = mood?(moods.find(m=>m.id===mood)?.hint||""):(isRu?"не указано":"non specificato");
-  const fmtPrefs = (p,who) => {
-    const pr = p.prefs||{};
-    const parts = [];
-    if (pr.name) parts.push(isRu?`Имя: ${pr.name}`:`Nome: ${pr.name}`);
-    if (pr.genres) parts.push(isRu?`Жанры: ${pr.genres}`:`Generi preferiti: ${pr.genres}`);
-    if (pr.notes) parts.push(isRu?`Заметки: ${pr.notes}`:`Note: ${pr.notes}`);
-    return parts.length ? `\n  [${parts.join(" | ")}]` : "";
-  };
+  const fmtPrefs = (p) => { const pr=p.prefs||{}; const parts=[]; if(pr.genres)parts.push(isRu?`жанры: ${pr.genres}`:`generi: ${pr.genres}`); if(pr.notes)parts.push(pr.notes); return parts.length?` [${parts.join(" | ")}]`:""; };
+  const recentOther = otherProf.library.filter(i=>i.addedAt).sort((a,b)=>new Date(b.addedAt)-new Date(a.addedAt)).slice(0,5).map(i=>`- ${i.title}${i.rating?" (★"+i.rating+")":""}`).join("\n");
+
   const persona = isRu
-    ? "Ты REELBOT — саркастичный ироничный ИИ, эксперт в кино и играх. ВСЕГДА отвечай по-русски. Краткий, острый, с юмором. Конкретные советы. Учитывай оба профиля и их предпочтения. Не предлагай уже просмотренное."
-    : "Sei REELBOT, IA sarcastica, esperta di film e videogiochi. Parla SEMPRE in italiano. Breve, pungente, con umorismo. Consigli concreti. Considera entrambi i profili e le loro preferenze. Non riproporre titoli gia visti.";
+    ? `Ты REELBOT. Сейчас говоришь с КИРОЙ. Её партнёр — АДАМ. ВСЕГДА отвечай по-русски. Ироничный, остроумный, конкретный. Учитывай вкусы обоих. Не предлагай уже просмотренное. Когда это уместно, упоминай что делал Адам: "Адам уже смотрел это и поставил 8/10" или "Адам добавил это в вишлист — может посмотреть вместе?". Советы должны отражать ваши общие интересы как пары.`
+    : `Sei REELBOT. Stai parlando con ADAM. La sua partner è KIRA. Parla SEMPRE in italiano. Ironico, brillante, concreto. Considera i gusti di entrambi. Non riproporre titoli già visti. Quando rilevante, menziona le interazioni di Kira: "Kira ha già visto questo e l'ha votato 8/10" o "Kira lo ha in wishlist — potete guardarlo insieme!". I consigli devono riflettere i gusti comuni della coppia.`;
+
   const tag = isRu
     ? `Библиотека: [REEL:{"op":"add","dest":"library","profile":"tu|lei|entrambi","title":"НАЗВАНИЕ","type":"film|serie|gioco","status":"finito|in corso|abbandonato","genre":"horror|azione|commedia|thriller|fantasy|sci-fi|romantico|animazione|documentario|altro","rating":null,"hours":2}]
 Вишлист: [REEL:{"op":"add","dest":"wishlist","profile":"tu|lei|entrambi","title":"НАЗВАНИЕ","type":"film|serie|gioco","genre":"horror|azione|commedia|thriller|fantasy|sci-fi|romantico|animazione|documentario|altro"}]
@@ -274,16 +294,18 @@ const CHAT_SYS = (lang, profiles, mood, active, moods) => {
     : `Libreria: [REEL:{"op":"add","dest":"library","profile":"tu|lei|entrambi","title":"TITOLO","type":"film|serie|gioco","status":"finito|in corso|abbandonato","genre":"horror|azione|commedia|thriller|fantasy|sci-fi|romantico|animazione|documentario|altro","rating":null,"hours":2}]
 Wishlist: [REEL:{"op":"add","dest":"wishlist","profile":"tu|lei|entrambi","title":"TITOLO","type":"film|serie|gioco","genre":"horror|azione|commedia|thriller|fantasy|sci-fi|romantico|animazione|documentario|altro"}]
 Rimuovi: [REEL:{"op":"remove","dest":"library|wishlist","title":"TITOLO ESATTO"}]`;
+
   return `${persona}\n\n${tag}
 
-LIBRERIA TU:${fmtPrefs(profiles.tu,"tu")}
-${fmt(profiles.tu.library)}
-LIBRERIA LEI:${fmtPrefs(profiles.lei,"lei")}
-${fmt(profiles.lei.library)}
-WISHLIST TU: ${fmt(profiles.tu.wishlist)}
-WISHLIST LEI: ${fmt(profiles.lei.wishlist)}
-UMORE: ${moodHint}
-PROFILO ATTIVO: ${active}`;
+LIBRERIA ${myName.toUpperCase()}:${fmtPrefs(myProf)}
+${fmt(myProf.library)}
+WISHLIST ${myName.toUpperCase()}: ${fmt(myProf.wishlist)}
+
+LIBRERIA ${otherName.toUpperCase()}:${fmtPrefs(otherProf)}
+${fmt(otherProf.library)}
+WISHLIST ${otherName.toUpperCase()}: ${fmt(otherProf.wishlist)}
+${recentOther?`\nULTIME AGGIUNTE DI ${otherName.toUpperCase()}:\n${recentOther}`:""}
+UMORE: ${moodHint}`;
 };
 
 const DETAIL_PROMPT = (title, type, lang) => {
@@ -364,15 +386,33 @@ const MoodSelector = ({selected,onSelect,t}) => {
 /* ─── LIB ROW ────────────────────────────────────────── */
 const LibRow = ({item,onClick}) => {
   const [hov,setHov] = useState(false);
+  const [poster,setPoster] = useState(null);
+
+  useEffect(()=>{
+    if (item.poster) { setPoster(item.poster); return; }
+    fetchPoster(item.title, item.type).then(url=>{ if(url) setPoster(url); });
+  },[item.title,item.type]);
+
   return (
     <div onClick={()=>onClick(item)} onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)}
-      style={{display:"flex",alignItems:"center",gap:12,padding:"10px 12px",cursor:"pointer",borderBottom:`1px solid ${C.border}`,background:hov?C.surface:"transparent",transition:"background .12s"}}>
-      <span style={{fontFamily:MONO,fontSize:11,fontWeight:700,color:TYPE_COL[item.type]||C.muted,width:14,flexShrink:0}}>{TYPE_CHAR[item.type]}</span>
-      <span style={{fontFamily:SANS,fontSize:14,fontWeight:500,color:C.text,flex:1,letterSpacing:.2}}>{item.title}</span>
-      <span style={{fontFamily:MONO,fontSize:9,color:C.dim,letterSpacing:1}}>{STATUS_CH[item.status]||""}</span>
-      {item.rating&&<span style={{fontFamily:MONO,fontSize:10,color:C.muted,letterSpacing:.5}}>{item.rating}/10</span>}
-      <span style={{fontFamily:MONO,fontSize:9,color:C.dim}}>{item.profileLabel==="entrambi"?"T+L":item.profileLabel==="tu"?"T":"L"}</span>
-      {hov&&<span style={{fontFamily:MONO,fontSize:9,color:C.accent,letterSpacing:1.5}}>APRI</span>}
+      style={{display:"flex",alignItems:"center",gap:12,padding:"8px 12px",cursor:"pointer",borderBottom:`1px solid ${C.border}`,background:hov?C.surface:"transparent",transition:"background .12s"}}>
+      {/* Poster thumbnail */}
+      <div style={{width:36,height:52,flexShrink:0,borderRadius:2,overflow:"hidden",background:C.border}}>
+        {poster
+          ? <img src={poster} alt="" style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/>
+          : <div style={{width:"100%",height:"100%",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:MONO,fontSize:11,fontWeight:700,color:TYPE_COL[item.type]||C.muted}}>{TYPE_CHAR[item.type]}</div>
+        }
+      </div>
+      <div style={{flex:1,minWidth:0}}>
+        <div style={{fontFamily:SANS,fontSize:14,fontWeight:500,color:C.text,letterSpacing:.2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{item.title}</div>
+        <div style={{display:"flex",gap:8,marginTop:3,alignItems:"center"}}>
+          {item.genre&&<span style={{fontFamily:MONO,fontSize:8,color:C.dim,letterSpacing:1,textTransform:"uppercase"}}>{item.genre}</span>}
+          <span style={{fontFamily:MONO,fontSize:8,color:C.dim,letterSpacing:1}}>{STATUS_CH[item.status]||""}</span>
+          {item.rating&&<span style={{fontFamily:MONO,fontSize:9,color:C.muted}}>★ {item.rating}/10</span>}
+        </div>
+      </div>
+      <span style={{fontFamily:MONO,fontSize:9,color:C.dim,flexShrink:0}}>{item.profileLabel==="entrambi"?"T+L":item.profileLabel==="tu"?"T":"L"}</span>
+      {hov&&<span style={{fontFamily:MONO,fontSize:9,color:C.accent,letterSpacing:1.5,flexShrink:0}}>APRI</span>}
     </div>
   );
 };
@@ -429,8 +469,12 @@ const DetailModal = ({item,onClose,lang,onStatus}) => {
   const [data,setData]=useState(null);
   const [loading,setLoading]=useState(true);
   const [err,setErr]=useState(false);
+  const [poster,setPoster]=useState(item.poster||null);
 
-  useEffect(()=>{ load(); },[]);
+  useEffect(()=>{
+    load();
+    if (!poster) fetchPoster(item.title,item.type).then(url=>{ if(url) setPoster(url); });
+  },[]);
   const load = async () => {
     setLoading(true); setErr(false);
     try {
@@ -449,13 +493,19 @@ const DetailModal = ({item,onClose,lang,onStatus}) => {
   return (
     <div style={{position:"fixed",inset:0,background:"#000000cc",zIndex:200,display:"flex",alignItems:"flex-end",justifyContent:"center"}} onClick={onClose}>
       <div onClick={e=>e.stopPropagation()} style={{background:C.bg,width:"100%",maxWidth:700,maxHeight:"88vh",display:"flex",flexDirection:"column",borderTop:`1px solid ${C.border}`,borderLeft:`1px solid ${C.border}`,borderRight:`1px solid ${C.border}`,animation:"slideUp .25s cubic-bezier(.16,1,.3,1)"}}>
-        <div style={{padding:"16px 20px",borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"flex-start",justifyContent:"space-between",flexShrink:0}}>
-          <div>
+        <div style={{padding:"16px 20px",borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"flex-start",justifyContent:"space-between",flexShrink:0,gap:16}}>
+          {/* Poster */}
+          {poster && (
+            <div style={{width:56,height:80,flexShrink:0,borderRadius:2,overflow:"hidden",background:C.border}}>
+              <img src={poster} alt="" style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/>
+            </div>
+          )}
+          <div style={{flex:1,minWidth:0}}>
             <div style={{fontFamily:MONO,fontSize:10,letterSpacing:2,color:TYPE_COL[item.type]||C.muted,marginBottom:6}}>{TYPE_CHAR[item.type]} — {item.type.toUpperCase()}{item.genre?` / ${item.genre.toUpperCase()}`:""}</div>
             <div style={{fontFamily:SANS,fontSize:22,fontWeight:900,color:C.text,letterSpacing:-.5,lineHeight:1.1}}>{item.title}</div>
             {data?.rating_critica&&<div style={{fontFamily:MONO,fontSize:10,color:C.muted,marginTop:6,letterSpacing:.5}}>{data.rating_critica}</div>}
           </div>
-          <button onClick={onClose} style={{background:"transparent",border:`1px solid ${C.border}`,color:C.muted,cursor:"pointer",fontFamily:MONO,fontSize:11,padding:"6px 10px",letterSpacing:1}}>ESC</button>
+          <button onClick={onClose} style={{background:"transparent",border:`1px solid ${C.border}`,color:C.muted,cursor:"pointer",fontFamily:MONO,fontSize:11,padding:"6px 10px",letterSpacing:1,flexShrink:0}}>ESC</button>
         </div>
         <div style={{display:"flex",borderBottom:`1px solid ${C.border}`,flexShrink:0}}>
           {TABS.map(tb=><button key={tb.id} onClick={()=>setTab(tb.id)} style={{flex:1,padding:"10px 4px",border:"none",cursor:"pointer",background:"transparent",fontFamily:MONO,fontSize:9,letterSpacing:2,color:tab===tb.id?C.accent:C.dim,borderBottom:tab===tb.id?`2px solid ${C.accent}`:"2px solid transparent",transition:"all .15s"}}>{tb.label}</button>)}
@@ -678,204 +728,74 @@ const StatsView = ({library,lang}) => {
   );
 };
 
-/* ─── AUTH HELPERS ───────────────────────────────────── */
-// Simple non-reversible hash — good enough for local storage PIN
-async function hashPin(pin) {
-  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("reelbot:" + pin));
-  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,"0")).join("");
-}
-
 /* ─── API KEY SETUP SCREEN ───────────────────────────── */
-const ApiKeySetup = ({ onDone }) => {
-  const [key, setKey] = useState("");
-  const [testing, setTesting] = useState(false);
-  const [err, setErr] = useState("");
+/* ─── AUTH ───────────────────────────────────────────── */
+const APP_PASSWORD = "Pipiski66";
 
-  const test = async () => {
-    if (!key.trim().startsWith("sk-ant-")) { setErr("La chiave deve iniziare con sk-ant-"); return; }
-    setTesting(true); setErr("");
-    try {
-      const r = await fetch("https://api.anthropic.com/v1/messages", {
-        method:"POST",
-        headers:{"Content-Type":"application/json","anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true","x-api-key":key.trim()},
-        body:JSON.stringify({model:"claude-haiku-4-5-20251001",max_tokens:10,messages:[{role:"user",content:"hi"}]}),
-      });
-      const d = await r.json();
-      if (d.error) throw new Error(d.error.message);
-      setApiKey(key.trim());
-      onDone();
-    } catch(e) { setErr("Chiave non valida: " + (e.message||"errore")); }
-    setTesting(false);
-  };
-
-  return (
-    <div style={{background:C.bg,minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"0 24px"}}>
-      <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}`}</style>
-      <div style={{fontFamily:MONO,fontSize:13,fontWeight:700,letterSpacing:4,color:C.text,marginBottom:4}}>REELBOT</div>
-      <div style={{fontFamily:MONO,fontSize:8,letterSpacing:2,color:C.dim,marginBottom:40}}>SETUP</div>
-
-      <div style={{width:"100%",maxWidth:360}}>
-        <div style={{fontFamily:MONO,fontSize:9,letterSpacing:2,color:C.dim,marginBottom:10}}>ANTHROPIC API KEY</div>
-        <input
-          value={key} onChange={e=>setKey(e.target.value)}
-          placeholder="sk-ant-api03-..."
-          type="password"
-          style={{width:"100%",boxSizing:"border-box",background:"transparent",border:`1px solid ${C.border}`,padding:"11px 14px",color:C.text,fontFamily:MONO,fontSize:11,outline:"none",letterSpacing:.5,marginBottom:10}}
-        />
-        {err && <div style={{fontFamily:MONO,fontSize:9,color:C.red,letterSpacing:1,marginBottom:10}}>{err}</div>}
-        <button onClick={test} disabled={testing||!key.trim()} style={{width:"100%",background:testing||!key.trim()?"transparent":C.accent,border:`1px solid ${testing||!key.trim()?C.border:C.accent}`,color:testing||!key.trim()?C.dim:C.bg,fontFamily:MONO,fontSize:10,letterSpacing:3,padding:"12px",cursor:testing||!key.trim()?"not-allowed":"pointer",transition:"all .2s"}}>
-          {testing?"VERIFICA IN CORSO...":"SALVA E CONTINUA"}
-        </button>
-
-        <div style={{marginTop:32,borderTop:`1px solid ${C.border}`,paddingTop:24}}>
-          <div style={{fontFamily:MONO,fontSize:9,letterSpacing:1.5,color:C.dim,lineHeight:2}}>
-            1. Vai su <span style={{color:C.accent}}>console.anthropic.com</span><br/>
-            2. Account → API Keys → Create Key<br/>
-            3. Copia la chiave e incollala sopra<br/>
-            4. La chiave viene salvata solo sul tuo dispositivo
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-/* ─── LOCK SCREEN ────────────────────────────────────── */
 const LockScreen = ({ onUnlock }) => {
-  const [screen, setScreen] = useState("choose"); // choose | enter_tu | enter_lei | setup_tu | setup_lei
-  const [pin, setPin] = useState("");
-  const [confirm, setConfirm] = useState("");
+  const [phase, setPhase] = useState("password"); // password | choose
+  const [pwd, setPwd] = useState("");
+  const [show, setShow] = useState(false);
   const [shake, setShake] = useState(false);
-  const [msg, setMsg] = useState("");
-  const [storedPins, setStoredPins] = useState(null);
+  const [err, setErr] = useState("");
   const inputRef = useRef();
 
-  useEffect(()=>{
-    stGet(SK.pins).then(p => setStoredPins(p || { tu: null, lei: null }));
-  },[]);
+  useEffect(()=>{ setTimeout(()=>inputRef.current?.focus(),100); },[phase]);
 
-  useEffect(()=>{ setTimeout(()=>inputRef.current?.focus(), 100); },[screen]);
-
-  const triggerShake = (m) => { setShake(true); setMsg(m); setPin(""); setConfirm(""); setTimeout(()=>setShake(false), 500); };
-
-  const handleDigit = (d) => {
-    if (pin.length >= 4) return;
-    const next = pin + d;
-    setPin(next);
-    if (next.length === 4) setTimeout(()=>submit(next), 80);
-  };
-
-  const submit = async (p) => {
-    const who = screen.includes("tu") ? "tu" : "lei";
-    const isSetup = screen.startsWith("setup");
-
-    if (isSetup) {
-      if (!confirm) {
-        setConfirm(p); setPin("");
-        setMsg(who === "tu" ? "Confirm PIN" : "Подтвердите PIN");
-        return;
-      }
-      if (p !== confirm) { triggerShake(who==="tu"?"PIN non coincide":"PIN не совпадает"); setConfirm(""); return; }
-      const h = await hashPin(p);
-      const updated = { ...storedPins, [who]: h };
-      await stSet(SK.pins, updated);
-      setStoredPins(updated);
-      onUnlock(who);
-    } else {
-      if (!storedPins?.[who]) { setScreen(`setup_${who}`); setPin(""); setMsg(who==="tu"?"Crea il tuo PIN (4 cifre)":"Создай свой PIN (4 цифры)"); return; }
-      const h = await hashPin(p);
-      if (h === storedPins[who]) { onUnlock(who); }
-      else { triggerShake(who==="tu"?"PIN errato":"Неверный PIN"); }
+  const submitPwd = (e) => {
+    e.preventDefault();
+    if (pwd === APP_PASSWORD) { setErr(""); setPhase("choose"); }
+    else {
+      setShake(true); setErr("Password errata"); setPwd("");
+      setTimeout(()=>{ setShake(false); setErr(""); },1200);
     }
   };
 
-  const Dot = ({filled}) => <div style={{width:12,height:12,borderRadius:"50%",border:`1px solid ${filled?C.accent:C.border}`,background:filled?C.accent:"transparent",transition:"all .1s"}}/>;
-  const DigitBtn = ({d}) => (
-    <button onClick={()=>handleDigit(String(d))} style={{width:64,height:64,background:"transparent",border:`1px solid ${C.border}`,fontFamily:MONO,fontSize:20,color:C.text,cursor:"pointer",borderRadius:1,transition:"background .1s"}}
-      onMouseEnter={e=>e.currentTarget.style.background=C.surface}
-      onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-      {d}
-    </button>
-  );
-
-  const isSetup = screen.startsWith("setup");
-  const who = screen.includes("tu") ? "tu" : "lei";
-  const phase = confirm ? 2 : 1;
-
-  if (storedPins === null) return (
-    <div style={{background:C.bg,minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center"}}>
-      <span style={{fontFamily:MONO,fontSize:10,letterSpacing:2,color:C.dim,animation:"pulse 1s infinite"}}>...</span>
-    </div>
-  );
-
-  if (screen === "choose") return (
-    <div style={{background:C.bg,minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:0}}>
+  if (phase === "password") return (
+    <div style={{background:C.bg,minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"0 24px"}}>
+      <style>{`@keyframes shake{0%,100%{transform:translateX(0)}20%,60%{transform:translateX(-8px)}40%,80%{transform:translateX(8px)}}@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}`}</style>
       <div style={{fontFamily:MONO,fontSize:13,fontWeight:700,letterSpacing:4,color:C.text,marginBottom:4}}>REELBOT</div>
       <div style={{fontFamily:MONO,fontSize:8,letterSpacing:2,color:C.dim,marginBottom:48}}>v4</div>
-      <div style={{display:"flex",flexDirection:"column",gap:10,width:220}}>
-        <button onClick={()=>{ setScreen(storedPins.tu?"enter_tu":"setup_tu"); setPin(""); setConfirm(""); setMsg(storedPins.tu?"Inserisci PIN":"Crea il tuo PIN (4 cifre)"); }}
-          style={{padding:"14px",border:`1px solid ${C.border}`,background:"transparent",fontFamily:MONO,fontSize:11,letterSpacing:3,color:C.text,cursor:"pointer",transition:"all .15s",textAlign:"left"}}
-          onMouseEnter={e=>{e.currentTarget.style.borderColor=C.accent;e.currentTarget.style.color=C.accent;}}
-          onMouseLeave={e=>{e.currentTarget.style.borderColor=C.border;e.currentTarget.style.color=C.text;}}>
-          PER LUI <span style={{float:"right",color:C.dim,fontSize:9}}>{storedPins.tu?"●":"○"}</span>
+      <form onSubmit={submitPwd} style={{width:"100%",maxWidth:300,animation:shake?"shake .4s ease":"none"}}>
+        <div style={{fontFamily:MONO,fontSize:9,letterSpacing:2,color:C.dim,marginBottom:8}}>PASSWORD</div>
+        <div style={{position:"relative",marginBottom:10}}>
+          <input
+            ref={inputRef}
+            type={show?"text":"password"}
+            value={pwd}
+            onChange={e=>setPwd(e.target.value)}
+            placeholder="••••••••"
+            autoComplete="current-password"
+            style={{width:"100%",boxSizing:"border-box",background:"transparent",border:`1px solid ${err?C.red:C.border}`,padding:"11px 40px 11px 14px",color:C.text,fontFamily:MONO,fontSize:14,outline:"none",letterSpacing:2}}
+          />
+          <button type="button" onClick={()=>setShow(s=>!s)}
+            style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",color:C.dim,cursor:"pointer",fontFamily:MONO,fontSize:9,letterSpacing:1}}>
+            {show?"HIDE":"SHOW"}
+          </button>
+        </div>
+        {err&&<div style={{fontFamily:MONO,fontSize:9,color:C.red,letterSpacing:1,marginBottom:10}}>{err}</div>}
+        <button type="submit"
+          style={{width:"100%",background:pwd?C.accent:"transparent",border:`1px solid ${pwd?C.accent:C.border}`,color:pwd?C.bg:C.dim,fontFamily:MONO,fontSize:10,letterSpacing:3,padding:"12px",cursor:pwd?"pointer":"default",transition:"all .2s"}}>
+          ENTRA
         </button>
-        <button onClick={()=>{ setScreen(storedPins.lei?"enter_lei":"setup_lei"); setPin(""); setConfirm(""); setMsg(storedPins.lei?"Введи PIN":"Создай свой PIN (4 цифры)"); }}
-          style={{padding:"14px",border:`1px solid ${C.border}`,background:"transparent",fontFamily:MONO,fontSize:11,letterSpacing:3,color:C.text,cursor:"pointer",transition:"all .15s",textAlign:"left"}}
-          onMouseEnter={e=>{e.currentTarget.style.borderColor=C.accent;e.currentTarget.style.color=C.accent;}}
-          onMouseLeave={e=>{e.currentTarget.style.borderColor=C.border;e.currentTarget.style.color=C.text;}}>
-          ДЛЯ НЕЁ <span style={{float:"right",color:C.dim,fontSize:9}}>{storedPins.lei?"●":"○"}</span>
-        </button>
-      </div>
-      <div style={{fontFamily:MONO,fontSize:8,letterSpacing:1.5,color:C.border,marginTop:48}}>● = PIN configurato</div>
+      </form>
     </div>
   );
 
   return (
     <div style={{background:C.bg,minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
-      <style>{`@keyframes shake{0%,100%{transform:translateX(0)}20%,60%{transform:translateX(-8px)}40%,80%{transform:translateX(8px)}}@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}`}</style>
-      {/* Back */}
-      <button onClick={()=>{setScreen("choose");setPin("");setConfirm("");setMsg("");}}
-        style={{position:"absolute",top:20,left:20,background:"transparent",border:"none",fontFamily:MONO,fontSize:9,letterSpacing:2,color:C.dim,cursor:"pointer"}}>← BACK</button>
-
-      {/* Profile label */}
-      <div style={{fontFamily:MONO,fontSize:10,letterSpacing:3,color:who==="tu"?C.accent:C.blue,marginBottom:8}}>
-        {who==="tu"?"PER LUI":"ДЛЯ НЕЁ"}
-      </div>
       <div style={{fontFamily:MONO,fontSize:13,fontWeight:700,letterSpacing:4,color:C.text,marginBottom:4}}>REELBOT</div>
-
-      {/* Status msg */}
-      <div style={{fontFamily:MONO,fontSize:9,letterSpacing:2,color:C.muted,marginBottom:32,height:16}}>
-        {isSetup ? (phase===1 ? (who==="tu"?"Crea PIN (4 cifre)":"Создай PIN (4 цифры)") : (who==="tu"?"Conferma PIN":"Подтвердите PIN")) : (who==="tu"?"Inserisci PIN":"Введи PIN")}
-        {msg && <span style={{color:C.red,marginLeft:10}}>{msg}</span>}
+      <div style={{fontFamily:MONO,fontSize:8,letterSpacing:2,color:C.dim,marginBottom:48}}>Chi sei?</div>
+      <div style={{display:"flex",flexDirection:"column",gap:10,width:240}}>
+        {[["tu","ADAM",C.accent],["lei","KIRA",C.blue]].map(([who,name,col])=>(
+          <button key={who} onClick={()=>onUnlock(who)}
+            style={{padding:"18px",border:`1px solid ${C.border}`,background:"transparent",fontFamily:MONO,fontSize:14,letterSpacing:4,color:C.text,cursor:"pointer",transition:"all .18s",textAlign:"center"}}
+            onMouseEnter={e=>{e.currentTarget.style.borderColor=col;e.currentTarget.style.color=col;e.currentTarget.style.background=col+"11";}}
+            onMouseLeave={e=>{e.currentTarget.style.borderColor=C.border;e.currentTarget.style.color=C.text;e.currentTarget.style.background="transparent";}}>
+            {name}
+          </button>
+        ))}
       </div>
-
-      {/* Dots */}
-      <div style={{display:"flex",gap:14,marginBottom:36,animation:shake?"shake .4s ease":"none"}}>
-        {[0,1,2,3].map(i=><Dot key={i} filled={i<pin.length}/>)}
-      </div>
-
-      {/* Keypad */}
-      <input ref={inputRef} type="tel" inputMode="numeric" value="" onChange={e=>{ const d=e.target.value.replace(/\D/g,""); if(d) handleDigit(d[0]); e.target.value=""; }} style={{position:"absolute",opacity:0,width:1,height:1}}/>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(3,64px)",gap:8}}>
-        {[1,2,3,4,5,6,7,8,9].map(d=><DigitBtn key={d} d={d}/>)}
-        <div/>
-        <DigitBtn d={0}/>
-        <button onClick={()=>setPin(p=>p.slice(0,-1))} style={{width:64,height:64,background:"transparent",border:`1px solid ${C.border}`,fontFamily:MONO,fontSize:14,color:C.muted,cursor:"pointer",borderRadius:1}}>⌫</button>
-      </div>
-
-      {/* Reset option (only if PIN already set) */}
-      {!isSetup && storedPins?.[who] && (
-        <button onClick={async()=>{
-          const updated={...storedPins,[who]:null};
-          await stSet(SK.pins,updated);
-          setStoredPins(updated);
-          setScreen(`setup_${who}`);
-          setPin(""); setConfirm("");
-          setMsg(who==="tu"?"Crea nuovo PIN":"Создай новый PIN");
-        }} style={{marginTop:32,background:"transparent",border:"none",fontFamily:MONO,fontSize:8,letterSpacing:2,color:C.border,cursor:"pointer"}}>
-          {who==="tu"?"RESET PIN":"СБРОС PIN"}
-        </button>
-      )}
     </div>
   );
 };
@@ -887,7 +807,8 @@ export default function ReelBot() {
   const [tab,setTab]             = useState("chat");
   const [visionMode,setVisionMode] = useState("mission");
   const [mood,setMood]           = useState(null);
-  const [messages,setMessages]   = useState(null);
+  // Per-profile chat histories
+  const [chats,setChats]         = useState({ tu:null, lei:null });
   const [input,setInput]         = useState("");
   const [chatLoading,setChatLoading] = useState(false);
   const [selected,setSelected]   = useState(null);
@@ -897,13 +818,19 @@ export default function ReelBot() {
   const [apiStatus,setApiStatus] = useState("idle");
   const [missions,setMissions]   = useState([]);
   const [authed,setAuthed]       = useState(null);
-  const [apiKeyReady,setApiKeyReady] = useState(false);
   const [isDesktop,setIsDesktop] = useState(window.innerWidth >= 900);
-  const [desktopRight,setDesktopRight] = useState("chat"); // null=checking, false=locked, "tu"|"lei"=unlocked
+  const [desktopRight,setDesktopRight] = useState("chat");
   const endRef   = useRef(null);
   const inputRef = useRef(null);
   const ready    = useRef(false);
-  const prevLang = useRef(null);
+
+  // Convenience: current profile's messages
+  const messages = chats[active] || null;
+  const setMessages = (val) => setChats(prev => ({
+    ...prev,
+    [active]: typeof val === "function" ? val(prev[active]) : val,
+  }));
+  const chatKey = (who) => who==="tu" ? SK.chat_adam : SK.chat_kira;
 
   const lang = LANG_CFG[active].code;
   const t    = TR[lang];
@@ -922,31 +849,31 @@ export default function ReelBot() {
   },[]);
 
   const bootLoad = async () => {
-    const [prof,chat,miss] = await Promise.all([stGet(SK.profiles), stGet(SK.chat), stGet(SK.missions)]);
+    const [prof, chatA, chatK, miss] = await Promise.all([
+      stGet(SK.profiles), stGet(SK.chat_adam), stGet(SK.chat_kira), stGet(SK.missions)
+    ]);
     if (prof) setProfiles(p=>({...DEF_PROF,...prof,tu:{...DEF_PROF.tu,...prof.tu,prefs:{...DEF_PREFS,...(prof.tu?.prefs||{})}},lei:{...DEF_PROF.lei,...prof.lei,prefs:{...DEF_PREFS,...(prof.lei?.prefs||{})}}}));
-    if (chat && chat.length>0) { setMessages(chat); prevLang.current=LANG_CFG["tu"].code; }
-    else { setMessages([{role:"assistant",content:WELCOME}]); prevLang.current="it"; }
+    setChats({
+      tu:  chatA?.length ? chatA : [{role:"assistant",content:WELCOME}],
+      lei: chatK?.length ? chatK : [{role:"assistant",content:WELCOME}],
+    });
     if (miss) setMissions(miss);
-    setApiKeyReady(!!getApiKey());
-    setAuthed(false); // show lock screen after loading
+    setAuthed(false);
   };
 
   const handleUnlock = (who) => {
     setActive(who);
     setAuthed(who);
+    setInput("");
   };
 
-  useEffect(()=>{ endRef.current?.scrollIntoView({behavior:"smooth"}); },[messages,chatLoading]);
+  useEffect(()=>{ endRef.current?.scrollIntoView({behavior:"smooth"}); },[chats, active, chatLoading]);
 
   const notify = (msg) => { setNotif(msg); setTimeout(()=>setNotif(null),3000); };
 
   /* ── PROFILE SAVE ── */
   const savePrefs = (who, prefs) => {
-    setProfiles(prev=>{
-      const next = {...prev,[who]:{...prev[who],prefs}};
-      stSet(SK.profiles, next);
-      return next;
-    });
+    setProfiles(prev=>{ const next={...prev,[who]:{...prev[who],prefs}}; stSet(SK.profiles,next); return next; });
     notify(t.prof_saved);
   };
 
@@ -982,10 +909,7 @@ export default function ReelBot() {
 
   /* ── MISSIONS ── */
   const saveMission = (m) => {
-    setMissions(prev=>{
-      const next=[...prev.filter(x=>x.id!==m.id),m];
-      stSet(SK.missions,next); return next;
-    });
+    setMissions(prev=>{ const next=[...prev.filter(x=>x.id!==m.id),m]; stSet(SK.missions,next); return next; });
   };
   const deleteMission = (id) => {
     setMissions(prev=>{ const next=prev.filter(x=>x.id!==id); stSet(SK.missions,next); return next; });
@@ -996,24 +920,23 @@ export default function ReelBot() {
     if (!input.trim()||chatLoading) return;
     const msg={role:"user",content:input};
     const next=[...(messages||[]),msg];
-    setMessages(next); setInput(""); setChatLoading(true);
+    setChats(prev=>({...prev,[active]:next}));
+    setInput(""); setChatLoading(true);
     try {
       const raw = await callClaude({
         system:CHAT_SYS(lang,profiles,mood,active,t.moods),
         messages:next.map(m=>({role:m.role,content:m.content})),
-        withSearch:true, maxTokens:1000,
-        onStatus:setApiStatus,
+        withSearch:true, maxTokens:1000, onStatus:setApiStatus,
       });
       const {clean,action}=parseReel(raw||t.conn_fail);
       applyAction(action);
       const final=[...next,{role:"assistant",content:clean}];
-      setMessages(final);
-      // persist last N messages
-      stSet(SK.chat, final.slice(-MAX_CHAT_STORED));
+      setChats(prev=>({...prev,[active]:final}));
+      stSet(chatKey(active), final.slice(-MAX_CHAT_STORED));
     } catch {
       const final=[...next,{role:"assistant",content:t.conn_fail}];
-      setMessages(final);
-      stSet(SK.chat,final.slice(-MAX_CHAT_STORED));
+      setChats(prev=>({...prev,[active]:final}));
+      stSet(chatKey(active), final.slice(-MAX_CHAT_STORED));
     }
     setChatLoading(false);
     setTimeout(()=>inputRef.current?.focus(),100);
@@ -1021,7 +944,9 @@ export default function ReelBot() {
 
   const clearChat = () => {
     const fresh=[{role:"assistant",content:WELCOME}];
-    setMessages(fresh); stSet(SK.chat,fresh); notify(t.chat_cleared);
+    setChats(prev=>({...prev,[active]:fresh}));
+    stSet(chatKey(active), fresh);
+    notify(t.chat_cleared);
   };
 
   const lib=allLib(), wish=allWish();
@@ -1048,7 +973,6 @@ export default function ReelBot() {
       <span style={{fontFamily:MONO,fontSize:10,letterSpacing:2,color:C.dim,animation:"pulse 1s infinite"}}>...</span>
     </div>
   );
-  if (!apiKeyReady) return <ApiKeySetup onDone={()=>setApiKeyReady(true)}/>;
   if (!authed) return <LockScreen onUnlock={handleUnlock}/>;
 
   // ── SHARED CONTENT PANELS ──
@@ -1137,6 +1061,8 @@ export default function ReelBot() {
   };
 
   // ── HEADER (shared) ──
+  const activeColor = active==="tu" ? C.accent : C.blue;
+  const activeName  = active==="tu" ? "ADAM" : "KIRA";
   const Header = () => (
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 20px",borderBottom:`1px solid ${C.border}`,flexShrink:0}}>
       <div style={{display:"flex",alignItems:"baseline",gap:10}}>
@@ -1145,20 +1071,16 @@ export default function ReelBot() {
         <ApiDot status={apiStatus} t={t}/>
       </div>
       <div style={{display:"flex",alignItems:"center",gap:10}}>
-        {isDesktop && <span style={{fontFamily:MONO,fontSize:8,letterSpacing:2,color:C.dim}}>DESKTOP</span>}
-        {/* Lock button */}
-        <button onClick={()=>setAuthed(false)} title="Lock" style={{background:"transparent",border:`1px solid ${C.border}`,fontFamily:MONO,fontSize:9,letterSpacing:1.5,padding:"5px 10px",color:C.dim,cursor:"pointer",transition:"all .15s"}}
+        {/* Current user badge */}
+        <span style={{fontFamily:MONO,fontSize:11,fontWeight:700,letterSpacing:3,color:activeColor,border:`1px solid ${activeColor}`,padding:"4px 12px"}}>
+          {activeName}
+        </span>
+        {/* Switch/Lock */}
+        <button onClick={()=>setAuthed(false)} title="Cambia profilo / Esci" style={{background:"transparent",border:`1px solid ${C.border}`,fontFamily:MONO,fontSize:9,letterSpacing:1.5,padding:"5px 10px",color:C.dim,cursor:"pointer",transition:"all .15s"}}
           onMouseEnter={e=>{e.currentTarget.style.borderColor=C.red;e.currentTarget.style.color=C.red;}}
           onMouseLeave={e=>{e.currentTarget.style.borderColor=C.border;e.currentTarget.style.color=C.dim;}}>
-          LOCK
+          SWITCH
         </button>
-        <div style={{display:"flex",border:`1px solid ${C.border}`}}>
-          {["tu","lei"].map(p=>(
-            <button key={p} onClick={()=>setActive(p)} style={{padding:"6px 16px",border:"none",cursor:"pointer",fontFamily:MONO,fontSize:10,letterSpacing:2,background:active===p?C.accent:"transparent",color:active===p?C.bg:C.dim,transition:"all .15s"}}>
-              {p==="tu"?"PER LUI":"ДЛЯ НЕЁ"}
-            </button>
-          ))}
-        </div>
       </div>
     </div>
   );
