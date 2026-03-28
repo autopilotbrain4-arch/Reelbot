@@ -498,9 +498,29 @@ const DetailModal = ({item,onClose,lang,onStatus}) => {
   const load = async () => {
     setLoading(true); setErr(false);
     try {
-      const raw = await callClaude({messages:[{role:"user",content:DETAIL_PROMPT(item.title,item.type,lang)}],withSearch:true,maxTokens:1200,onStatus});
-      setData(JSON.parse(raw.replace(/```json|```/g,"").trim()));
-    } catch { setErr(true); }
+      // First call without search to get structured JSON reliably
+      const raw = await callClaude({
+        messages:[{role:"user",content:DETAIL_PROMPT(item.title,item.type,lang)}],
+        withSearch:false,
+        maxTokens:1400,
+        onStatus
+      });
+      const cleaned = raw.replace(/```json|```/g,"").trim();
+      if (!cleaned) throw new Error("empty response");
+      setData(JSON.parse(cleaned));
+    } catch(e) {
+      // Retry without search on failure
+      try {
+        const raw2 = await callClaude({
+          messages:[{role:"user",content:DETAIL_PROMPT(item.title,item.type,lang)+" Rispondi SOLO con JSON valido."}],
+          withSearch:false,
+          maxTokens:1400,
+          onStatus
+        });
+        const cleaned2 = raw2.replace(/```json|```/g,"").trim();
+        setData(JSON.parse(cleaned2));
+      } catch { setErr(true); }
+    }
     setLoading(false);
   };
 
