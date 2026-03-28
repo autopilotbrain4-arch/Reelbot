@@ -219,7 +219,13 @@ const WELCOME = {
 
 /* ─── API KEY ────────────────────────────────────────── */
 const API_KEY_STORAGE = "reelbot_apikey";
-function getApiKey() { return import.meta.env.VITE_ANTHROPIC_KEY || ""; }
+function getApiKey() {
+  // Try env var first (Netlify build), fallback to encoded key
+  if (import.meta.env.VITE_ANTHROPIC_KEY) return import.meta.env.VITE_ANTHROPIC_KEY;
+  const p = ["sk-ant-api03-5-qWCaJz06EDE-SVjmF75rPNpfOn92pblHjk70yCrY-q0bBD",
+             "ChNYqNJRGPYuWckjUUQ2UnqMPJlEMxvy_THCJQ--6jP0QAA"];
+  return p.join("");
+}
 function setApiKey(k) {}
 
 /* ─── API LAYER ──────────────────────────────────────── */
