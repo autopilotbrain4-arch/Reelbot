@@ -517,7 +517,7 @@ const ProfileEditor = ({profiles,active,onSave,t}) => {
 };
 
 /* ─── DETAIL MODAL ───────────────────────────────────── */
-const DetailModal = ({item,onClose,lang,onStatus}) => {
+const DetailModal = ({item,onClose,lang,onStatus,onAddToLibrary}) => {
   const t = TR[lang]||TR.it;
   const [tab,setTab]       = useState("trama");
   const [data,setData]     = useState(null);
@@ -526,42 +526,52 @@ const DetailModal = ({item,onClose,lang,onStatus}) => {
   const [poster,setPoster] = useState(item.poster||null);
   const [trailer,setTrailer] = useState(null); // embed URL or YT search URL
 
+  // Clean title: remove "(Korean Title) - 2016" patterns that break template literals
+  const cleanTitle = item.title.replace(/\s*\([^)]{0,30}\)\s*[-\u2013]\s*\d{4}$/,"").replace(/\s*[-\u2013]\s*\d{4}$/,"").trim();
+  const [added,setAdded] = useState(false);
+
   useEffect(()=>{
     load();
-    if (!poster) fetchPoster(item.title,item.type).then(u=>{ if(u) setPoster(u); });
+    if (!poster) fetchPoster(cleanTitle, item.type).then(u=>{ if(u) setPoster(u); });
   },[]);
 
   useEffect(()=>{
     if (!data?.youtube_query) return;
-    // Try invidious for embeddable player, fallback to YT search link
     const q = data.youtube_query;
-    fetch(`https://vid.puffyan.us/api/v1/search?q=${encodeURIComponent(q)}&type=video&fields=videoId&hl=it`)
-      .then(r=>r.ok?r.json():null)
-      .then(d=>{ const id=d?.[0]?.videoId; setTrailer(id?`https://www.youtube.com/embed/${id}?rel=0`:`https://www.youtube.com/results?search_query=${encodeURIComponent(q)}`); })
-      .catch(()=>setTrailer(`https://www.youtube.com/results?search_query=${encodeURIComponent(q)}`));
+    const tryInvidious = async () => {
+      for (const base of ["https://iv.ggtyler.dev","https://invidious.privacydev.net"]) {
+        try {
+          const r = await fetch(base+"/api/v1/search?q="+encodeURIComponent(q)+"&type=video&fields=videoId",{signal:AbortSignal.timeout(4000)});
+          if (r.ok) { const d=await r.json(); const id=d?.[0]?.videoId; if(id) return "https://www.youtube-nocookie.com/embed/"+id+"?rel=0"; }
+        } catch {}
+      }
+      return "https://www.youtube.com/results?search_query="+encodeURIComponent(q);
+    };
+    tryInvidious().then(url=>setTrailer(url));
   },[data]);
 
   const load = async () => {
     setLoading(true); setErr(false);
     const parse = (raw) => {
-      const s = raw.replace(/```json|```/g,"").trim();
-      // Find the first { and last } to extract JSON even if there's extra text
+      const s = (raw||"").replace(/```json|```/g,"").trim();
       const start = s.indexOf("{");
       const end = s.lastIndexOf("}");
-      if (start===-1||end===-1) throw new Error("no json");
+      if (start===-1||end===-1||end<=start) throw new Error("no json");
       return JSON.parse(s.substring(start, end+1));
     };
     try {
-      const raw = await callClaude({messages:[{role:"user",content:DETAIL_PROMPT(item.title,item.type,lang)}],withSearch:false,maxTokens:1800,onStatus});
+      const raw = await callClaude({messages:[{role:"user",content:DETAIL_PROMPT(cleanTitle,item.type,lang)}],withSearch:false,maxTokens:1800,onStatus});
       setData(parse(raw));
     } catch {
       try {
-        const raw2 = await callClaude({messages:[{role:"user",content:DETAIL_PROMPT(item.title,item.type,lang)+"\n\nIMPORTANTE: Rispondi SOLO con il JSON, nessun testo prima o dopo."}],withSearch:false,maxTokens:1800,onStatus});
+        const raw2 = await callClaude({messages:[{role:"user",content:DETAIL_PROMPT(cleanTitle,item.type,lang)+"\n\nRispondi SOLO con JSON valido. Inizia con { e termina con }."}],withSearch:false,maxTokens:1800,onStatus});
         setData(parse(raw2));
       } catch { setErr(true); }
     }
     setLoading(false);
   };
+
+  const handleAdd = () => { if(onAddToLibrary){onAddToLibrary({...item,title:cleanTitle});setAdded(true);} };
 
   const TABS=[
     {id:"trama",label:t.dtab_trama},
@@ -601,6 +611,9 @@ const DetailModal = ({item,onClose,lang,onStatus}) => {
             {data?.rating_critica&&<div style={{fontFamily:MONO,fontSize:9,color:C.accent,letterSpacing:.5}}>{data.rating_critica}</div>}
             {data?.cast&&<div style={{fontFamily:SANS,fontSize:11,color:C.dim,marginTop:5,lineHeight:1.5}}>{data.cast}</div>}
             {data?.simili?.length>0&&<div style={{display:"flex",gap:5,flexWrap:"wrap",marginTop:8}}>{data.simili.map((s,i)=><span key={i} style={{fontFamily:MONO,fontSize:8,padding:"2px 7px",border:`1px solid ${C.border}`,color:C.dim}}>{s}</span>)}</div>}
+            <button onClick={handleAdd} disabled={added} style={{marginTop:10,fontFamily:MONO,fontSize:8,letterSpacing:2,padding:"5px 12px",border:`1px solid ${added?C.green:C.accent}`,background:"transparent",color:added?C.green:C.accent,cursor:added?"default":"pointer",transition:"all .2s"}}>
+              {added?(lang==="ru"?"✓ ДОБАВЛЕНО":"✓ AGGIUNTO"):(lang==="ru"?"+ В БИБЛИОТЕКУ":"+ LIBRERIA")}
+            </button>
           </div>
           <button onClick={onClose} style={{background:"transparent",border:`1px solid ${C.border}`,color:C.muted,cursor:"pointer",fontFamily:MONO,fontSize:10,padding:"6px 10px",flexShrink:0,alignSelf:"flex-start"}}>ESC</button>
         </div>
@@ -1106,7 +1119,7 @@ export default function ReelBot() {
   // ── SHARED CONTENT PANELS ──
 
 
-  // Chat message with poster extraction
+  // Chat message with poster extraction — posters INSIDE bubble
   const ChatMessage = ({m, onItemClick}) => {
     const [posters,setPosters] = useState({});
     useEffect(()=>{
@@ -1122,30 +1135,33 @@ export default function ReelBot() {
     },[m.content]);
 
     const posterList = Object.entries(posters);
+    const isUser = m.role==="user";
 
     return (
-      <div style={{alignSelf:m.role==="user"?"flex-end":"flex-start",maxWidth:"90%",marginBottom:6,animation:"fadeIn .2s"}}>
-        {/* Message bubble */}
-        <div style={{padding:"12px 14px",background:m.role==="user"?C.accent:C.surface,color:m.role==="user"?C.bg:C.body,fontFamily:SANS,fontSize:14,lineHeight:1.7,letterSpacing:.1,borderLeft:m.role==="assistant"?`2px solid ${C.border}`:"none"}}
-          dangerouslySetInnerHTML={{__html:mdLight(m.content)}}/>
-        {/* Posters — integrated below bubble, same width */}
-        {posterList.length>0&&(
-          <div style={{display:"flex",gap:8,marginTop:2,flexWrap:"nowrap",overflowX:"auto",scrollbarWidth:"none",paddingBottom:2}}>
-            {posterList.map(([title,url])=>(
-              <div key={title} onClick={()=>onItemClick({title,type:"film",genre:""})}
-                title={title}
-                style={{cursor:"pointer",flexShrink:0,width:90,height:130,position:"relative",overflow:"hidden",borderRadius:2,boxShadow:"0 2px 12px #00000066",transition:"transform .15s"}}
-                onMouseEnter={e=>e.currentTarget.style.transform="scale(1.04)"}
-                onMouseLeave={e=>e.currentTarget.style.transform="scale(1)"}>
-                <img src={url} alt={title} style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/>
-                <div style={{position:"absolute",bottom:0,left:0,right:0,background:"linear-gradient(transparent,#000000ee)",padding:"20px 6px 6px"}}>
-                  <div style={{fontFamily:MONO,fontSize:8,color:"#fff",letterSpacing:.5,lineHeight:1.3,overflow:"hidden",maxHeight:24}}>{title.substring(0,22)}</div>
+      <div style={{alignSelf:isUser?"flex-end":"flex-start",maxWidth:"90%",marginBottom:6,animation:"fadeIn .2s"}}>
+        <div style={{background:isUser?C.accent:C.surface,borderLeft:isUser?"none":`2px solid ${C.border}`,overflow:"hidden"}}>
+          {/* Text */}
+          <div style={{padding:"12px 14px",color:isUser?C.bg:C.body,fontFamily:SANS,fontSize:14,lineHeight:1.7,letterSpacing:.1}}
+            dangerouslySetInnerHTML={{__html:mdLight(m.content)}}/>
+          {/* Posters INSIDE bubble */}
+          {posterList.length>0&&(
+            <div style={{display:"flex",gap:6,padding:"0 14px 14px",flexWrap:"nowrap",overflowX:"auto",scrollbarWidth:"none"}}>
+              {posterList.map(([title,url])=>(
+                <div key={title} onClick={()=>onItemClick({title,type:"film",genre:""})}
+                  title={title}
+                  style={{cursor:"pointer",flexShrink:0,width:85,height:122,position:"relative",overflow:"hidden",borderRadius:2,boxShadow:"0 2px 8px #00000088",transition:"transform .15s"}}
+                  onMouseEnter={e=>e.currentTarget.style.transform="scale(1.05)"}
+                  onMouseLeave={e=>e.currentTarget.style.transform="scale(1)"}>
+                  <img src={url} alt={title} style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/>
+                  <div style={{position:"absolute",bottom:0,left:0,right:0,background:"linear-gradient(transparent,#000000ee)",padding:"18px 5px 5px"}}>
+                    <div style={{fontFamily:MONO,fontSize:7,color:"#fff",letterSpacing:.3,lineHeight:1.3,overflow:"hidden"}}>{title.substring(0,18)}</div>
+                  </div>
+                  <div style={{position:"absolute",top:4,right:4,background:C.accent,padding:"1px 4px",fontFamily:MONO,fontSize:7,color:C.bg}}>›</div>
                 </div>
-                <div style={{position:"absolute",top:6,right:6,background:C.accent,borderRadius:1,padding:"2px 5px",fontFamily:MONO,fontSize:7,color:C.bg,letterSpacing:1}}>›</div>
-              </div>
-            ))}
-          </div>
-        )}
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     );
   };
@@ -1284,7 +1300,7 @@ export default function ReelBot() {
           input:focus,textarea:focus{border-color:${C.accent}!important;outline:none;}
         `}</style>
         <Notif msg={notif}/>
-        {selected&&<DetailModal item={selected} onClose={()=>setSelected(null)} lang={lang} onStatus={setApiStatus}/>}
+        {selected&&<DetailModal item={selected} onClose={()=>setSelected(null)} lang={lang} onStatus={setApiStatus} onAddToLibrary={(it)=>{ applyAction({op:"add",dest:"library",profile:active,title:it.title,type:it.type||"film",genre:it.genre||"",status:"finito",hours:2}); setSelected(null); }}/>}
         <Header/>
         <div style={{display:"flex",flex:1,overflow:"hidden"}}>
           {/* LEFT SIDEBAR */}
@@ -1414,7 +1430,7 @@ export default function ReelBot() {
       `}</style>
 
       <Notif msg={notif}/>
-      {selected&&<DetailModal item={selected} onClose={()=>setSelected(null)} lang={lang} onStatus={setApiStatus}/>}
+      {selected&&<DetailModal item={selected} onClose={()=>setSelected(null)} lang={lang} onStatus={setApiStatus} onAddToLibrary={(it)=>{ applyAction({op:"add",dest:"library",profile:active,title:it.title,type:it.type||"film",genre:it.genre||"",status:"finito",hours:2}); setSelected(null); }}/>}
       <Header/>
 
       {/* MOBILE TABS */}
