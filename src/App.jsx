@@ -18,6 +18,7 @@ const SK = {
   chat_kira: "reelbot_v4_chat_kira",
   missions:  "reelbot_v4_missions",
   pins:      "reelbot_v4_pins",
+  detail:    "reelbot_v4_detail_", // + title slug
 };
 
 const MAX_CHAT_STORED = 60;
@@ -51,6 +52,24 @@ async function stSet(key, val) {
     });
   } catch {}
 }
+
+/* ─── DETAIL CACHE ───────────────────────────────────── */
+function detailKey(title) {
+  return SK.detail + title.toLowerCase().replace(/[^a-z0-9]+/g,"-").substring(0,60);
+}
+async function getDetailCache(title) {
+  try {
+    const d = await stGet(detailKey(title));
+    if (!d) return null;
+    // Expire after 30 days
+    if (d.cachedAt && Date.now() - new Date(d.cachedAt).getTime() > 30*24*3600*1000) return null;
+    return d.data;
+  } catch { return null; }
+}
+async function setDetailCache(title, data) {
+  try { await stSet(detailKey(title), { data, cachedAt: new Date().toISOString() }); } catch {}
+}
+
 
 /* ─── TMDB CONFIG ────────────────────────────────────── */
 const TMDB_KEY = "3808c106fa8d52adb5839faad1155f56";
@@ -557,13 +576,21 @@ const DetailModal = ({item,onClose,lang,onStatus,onAddToLibrary}) => {
       if (start===-1||end===-1||end<=start) throw new Error("no json");
       return JSON.parse(s.substring(start, end+1));
     };
+    // Check cache first — instant load
+    const cached = await getDetailCache(cleanTitle);
+    if (cached) { setData(cached); setLoading(false); return; }
+    // Not cached — fetch from API then save
     try {
       const raw = await callClaude({messages:[{role:"user",content:DETAIL_PROMPT(cleanTitle,item.type,lang)}],withSearch:false,maxTokens:1800,onStatus});
-      setData(parse(raw));
+      const parsed = parse(raw);
+      setData(parsed);
+      setDetailCache(cleanTitle, parsed);
     } catch {
       try {
         const raw2 = await callClaude({messages:[{role:"user",content:DETAIL_PROMPT(cleanTitle,item.type,lang)+"\n\nRispondi SOLO con JSON valido. Inizia con { e termina con }."}],withSearch:false,maxTokens:1800,onStatus});
-        setData(parse(raw2));
+        const parsed2 = parse(raw2);
+        setData(parsed2);
+        setDetailCache(cleanTitle, parsed2);
       } catch { setErr(true); }
     }
     setLoading(false);
@@ -1037,6 +1064,21 @@ export default function ReelBot() {
         const dest=action.dest||"library";
         targets.forEach(tgt=>{ if(!next[tgt])return; const arr=next[tgt][dest]; const idx=arr.findIndex(i=>i.title.toLowerCase()===action.title.toLowerCase()); const item={...action,profile:tgt,addedAt:new Date().toISOString()}; if(idx>=0)arr[idx]={...arr[idx],...item};else arr.push(item); });
         notify(t.added(action.title));
+        // Pre-fetch detail in background for instant load next time
+        if (action.dest==="library"||!action.dest) {
+          const title = action.title;
+          getDetailCache(title).then(cached=>{
+            if (!cached) {
+              callClaude({messages:[{role:"user",content:DETAIL_PROMPT(title,action.type||"film",lang)}],withSearch:false,maxTokens:1800}).then(raw=>{
+                try {
+                  const s=(raw||"").replace(/```json|```/g,"").trim();
+                  const start=s.indexOf("{"); const end=s.lastIndexOf("}");
+                  if(start!==-1&&end>start) setDetailCache(title,JSON.parse(s.substring(start,end+1)));
+                } catch {}
+              }).catch(()=>{});
+            }
+          });
+        }
       } else if (action.op==="remove") {
         const dest=action.dest||"library";
         ["tu","lei"].forEach(tgt=>{next[tgt][dest]=next[tgt][dest].filter(i=>i.title.toLowerCase()!==action.title.toLowerCase());});
