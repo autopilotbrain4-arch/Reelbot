@@ -248,8 +248,8 @@ const TYPE_CHAR = { film:"F", serie:"S", gioco:"G" };
 const STATUS_CH = { finito:"[OK]", "in corso":"[...]", abbandonato:"[--]" };
 
 const WELCOME = {
-  tu:  "Ciao Adam. Sono REELBOT.\n\nDimmi cosa hai guardato o giocato di recente, oppure chiedimi consigli. Usa **Vision** per analizzare screenshot da film e giochi.",
-  lei: "Привет, Кира. Я REELBOT.\n\nРасскажи что недавно смотрела или играла, или попроси совет. Используй **Vision** для анализа скриншотов из фильмов и игр.",
+  tu:  "Ciao Adam. Sono REELBOT.\n\nDimmi cosa hai guardato o giocato di recente, oppure chiedimi consigli su film, serie e giochi.",
+  lei: "Привет, Кира. Я REELBOT.\n\nРасскажи что недавно смотрела или играла, или попроси совет по фильмам, сериалам и играм.",
 };
 
 /* ─── API KEY ────────────────────────────────────────── */
@@ -1159,14 +1159,29 @@ export default function ReelBot() {
   // ── SHARED CONTENT PANELS ──
 
 
-  // Chat message with poster extraction — posters INSIDE bubble
+  // ChatMessage — film recommendations rendered as rows with poster + text
   const ChatMessage = ({m, onItemClick}) => {
     const [posters,setPosters] = useState({});
+    const isUser = m.role==="user";
+
+    // Parse film entries: **Title (Year)** - description
+    const parseFilmRows = (content) => {
+      const rows = [];
+      const lines = (content||"").split("\n");
+      lines.forEach(line => {
+        // Match "- **Title (Year)** - description" or "- **Title** - description"
+        const m = line.match(/^[-–•]\s*\*\*([^*]+)\*\*\s*[-–]?\s*(.*)/);
+        if (m) rows.push({ raw: line, title: m[1].replace(/\s*\(\d{4}\)\s*$/,"").trim(), fullTitle: m[1].trim(), desc: m[2].trim() });
+      });
+      return rows;
+    };
+
+    const filmRows = isUser ? [] : parseFilmRows(m.content);
+    const filmTitles = new Set(filmRows.map(r=>r.title));
+
     useEffect(()=>{
-      if (m.role!=="assistant") return;
-      const matches = [...(m.content||"").matchAll(/\*\*([^*]{2,60}?)\*\*/g)];
-      const titles = [...new Set(matches.map(x=>x[1].replace(/\s*\(\d{4}\)\s*$/,"").trim()))].slice(0,8);
-      titles.forEach(title=>{
+      if (isUser || filmRows.length===0) return;
+      filmRows.forEach(({title})=>{
         fetchPoster(title,"film").then(url=>{
           if (url) setPosters(p=>({...p,[title]:url}));
           else fetchPoster(title,"serie").then(u=>{ if(u) setPosters(p=>({...p,[title]:u})); });
@@ -1174,33 +1189,65 @@ export default function ReelBot() {
       });
     },[m.content]);
 
-    const posterList = Object.entries(posters);
-    const isUser = m.role==="user";
+    // Replace film lines with placeholders for rendering
+    const renderContent = () => {
+      if (filmRows.length === 0) {
+        return <div style={{padding:"12px 14px",color:isUser?C.bg:C.body,fontFamily:SANS,fontSize:14,lineHeight:1.7,letterSpacing:.1}}
+          dangerouslySetInnerHTML={{__html:mdLight(m.content)}}/>;
+      }
+      // Split content into segments: text blocks and film rows
+      const segments = [];
+      let remaining = m.content;
+      filmRows.forEach(row => {
+        const idx = remaining.indexOf(row.raw);
+        if (idx > 0) segments.push({type:"text", content: remaining.substring(0, idx)});
+        segments.push({type:"film", ...row});
+        remaining = remaining.substring(idx + row.raw.length);
+      });
+      if (remaining.trim()) segments.push({type:"text", content: remaining});
+
+      return segments.map((seg, i) => {
+        if (seg.type==="text") {
+          const clean = seg.content.trim();
+          if (!clean) return null;
+          return <div key={i} style={{padding:"10px 14px",color:C.body,fontFamily:SANS,fontSize:14,lineHeight:1.7,letterSpacing:.1}}
+            dangerouslySetInnerHTML={{__html:mdLight(clean)}}/>;
+        }
+        // Film row
+        const poster = posters[seg.title];
+        return (
+          <div key={i} onClick={()=>onItemClick({title:seg.title,type:"film",genre:""})}
+            style={{display:"flex",alignItems:"stretch",gap:0,cursor:"pointer",borderTop:`1px solid ${C.border}`,transition:"background .12s"}}
+            onMouseEnter={e=>e.currentTarget.style.background=C.accentDim}
+            onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+            {/* Poster */}
+            <div style={{width:54,flexShrink:0,background:C.border,position:"relative",overflow:"hidden"}}>
+              {poster
+                ? <img src={poster} alt={seg.title} style={{width:"100%",height:"100%",objectFit:"cover",display:"block",minHeight:78}}/>
+                : <div style={{width:54,height:78,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:MONO,fontSize:11,color:C.dim}}>F</div>
+              }
+            </div>
+            {/* Text */}
+            <div style={{flex:1,padding:"10px 12px",minWidth:0}}>
+              <div style={{fontFamily:SANS,fontSize:13,fontWeight:700,color:C.text,marginBottom:3,letterSpacing:.1}}>
+                <strong>{seg.fullTitle}</strong>
+              </div>
+              {seg.desc && <div style={{fontFamily:SANS,fontSize:12,color:C.muted,lineHeight:1.6}} dangerouslySetInnerHTML={{__html:mdLight(seg.desc)}}/>}
+            </div>
+            <div style={{display:"flex",alignItems:"center",padding:"0 10px",color:C.accent,fontFamily:MONO,fontSize:10}}>›</div>
+          </div>
+        );
+      });
+    };
 
     return (
-      <div style={{alignSelf:isUser?"flex-end":"flex-start",maxWidth:"90%",marginBottom:6,animation:"fadeIn .2s"}}>
+      <div style={{alignSelf:isUser?"flex-end":"flex-start",maxWidth:"92%",marginBottom:6,animation:"fadeIn .2s"}}>
         <div style={{background:isUser?C.accent:C.surface,borderLeft:isUser?"none":`2px solid ${C.border}`,overflow:"hidden"}}>
-          {/* Text */}
-          <div style={{padding:"12px 14px",color:isUser?C.bg:C.body,fontFamily:SANS,fontSize:14,lineHeight:1.7,letterSpacing:.1}}
-            dangerouslySetInnerHTML={{__html:mdLight(m.content)}}/>
-          {/* Posters INSIDE bubble */}
-          {posterList.length>0&&(
-            <div style={{display:"flex",gap:6,padding:"0 14px 14px",flexWrap:"nowrap",overflowX:"auto",scrollbarWidth:"none"}}>
-              {posterList.map(([title,url])=>(
-                <div key={title} onClick={()=>onItemClick({title,type:"film",genre:""})}
-                  title={title}
-                  style={{cursor:"pointer",flexShrink:0,width:85,height:122,position:"relative",overflow:"hidden",borderRadius:2,boxShadow:"0 2px 8px #00000088",transition:"transform .15s"}}
-                  onMouseEnter={e=>e.currentTarget.style.transform="scale(1.05)"}
-                  onMouseLeave={e=>e.currentTarget.style.transform="scale(1)"}>
-                  <img src={url} alt={title} style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/>
-                  <div style={{position:"absolute",bottom:0,left:0,right:0,background:"linear-gradient(transparent,#000000ee)",padding:"18px 5px 5px"}}>
-                    <div style={{fontFamily:MONO,fontSize:7,color:"#fff",letterSpacing:.3,lineHeight:1.3,overflow:"hidden"}}>{title.substring(0,18)}</div>
-                  </div>
-                  <div style={{position:"absolute",top:4,right:4,background:C.accent,padding:"1px 4px",fontFamily:MONO,fontSize:7,color:C.bg}}>›</div>
-                </div>
-              ))}
-            </div>
-          )}
+          {isUser
+            ? <div style={{padding:"10px 14px",color:C.bg,fontFamily:SANS,fontSize:14,lineHeight:1.7}}
+                dangerouslySetInnerHTML={{__html:mdLight(m.content)}}/>
+            : renderContent()
+          }
         </div>
       </div>
     );
