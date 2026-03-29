@@ -346,12 +346,15 @@ UMORE: ${moodHint}`;
 
 const DETAIL_PROMPT = (title, type, lang) => {
   const isRu = lang==="ru";
-  const f=(it,ru)=>isRu?ru:it;
-  return `${isRu
-    ?`Ты эксперт по ${type==="gioco"?"видеоиграм":"кино и сериалам"}. Дай подробную информацию о "${title}". Отвечай ТОЛЬКО валидным JSON, весь текст на русском.`
-    :`Sei esperto di ${type==="gioco"?"videogiochi":"cinema e serie TV"}. Fornisci informazioni dettagliate su "${title}". Rispondi SOLO con JSON valido, tutto in italiano.`}
-
-{"anno":"${f("anno di uscita (solo numero)","год выхода (только число)")}","regista":"${f("regista/sviluppatore","режиссёр/разработчик")}","cast":"${f("attori principali separati da virgola","главные актёры через запятую")}","genere":"${f("genere principale","основной жанр")}","durata":"${f("durata in minuti per film, stagioni per serie, ore per giochi","длительность в минутах для фильмов, сезоны для сериалов, часы для игр")}","rating_critica":"${f("Metacritic XX/100 · IMDb X.X/10","Metacritic XX/100 · IMDb X.X/10")}","trama":"${f("trama completa e coinvolgente 300-400 parole","подробный сюжет 300-400 слов")}","origine":"${f("150-200 parole: come è nata, eventi reali ispiratori, curiosità di produzione","150-200 слов: история создания, реальные факты, закулисье")}","teorie":[{"titolo":"...","descrizione":"${f("teoria dettagliata 80-120 parole","подробная теория 80-120 слов")}"},{"titolo":"...","descrizione":"..."},{"titolo":"...","descrizione":"..."}],"curiosita":["${f("curiosità dettagliata 60-80 parole","интересный факт 60-80 слов")}","...","...","..."],"da_notare":["${f("dettaglio da notare durante la visione","деталь на которую стоит обратить внимание")}","...","..."],"gameplay_tips":${type==="gioco"?`["${f("consiglio gameplay dettagliato","подробный совет по геймплею")}","...","...","..."]`:"null"},"achievements":${type==="gioco"?`[{"nome":"...","come":"${f("spiegazione dettagliata","подробное объяснение")}","difficolta":"facile|medio|difficile"}]`:"null"},"simili":["${f("titolo simile 1","похожий тайтл 1")}","...","..."],"youtube_query":"${f(`${title} trailer ufficiale italiano`,"${title} официальный трейлер")}"}`;
+  const isGame = type==="gioco";
+  if (isRu) {
+    return `Ты эксперт по ${isGame?"видеоиграм":"кино и сериалам"}. Дай подробную информацию о "${title}".
+Отвечай ТОЛЬКО валидным JSON без markdown, весь текст на русском:
+{"anno":"год выхода","regista":"режиссёр или разработчик","cast":"главные актёры через запятую","genere":"основной жанр","durata":"длительность (мин для фильмов, сезоны для сериалов, часы для игр)","rating_critica":"IMDb X.X/10 или Metacritic XX/100","trama":"подробный сюжет 300-400 слов","origine":"история создания 150-200 слов","teorie":[{"titolo":"название теории","descrizione":"описание 80-120 слов"},{"titolo":"...","descrizione":"..."},{"titolo":"...","descrizione":"..."}],"curiosita":["интересный факт 60-80 слов","...","...","..."],"da_notare":["деталь на которую стоит обратить внимание","...","..."],"gameplay_tips":${isGame?'["совет по геймплею","...","..."]':"null"},"achievements":${isGame?'[{"nome":"название","come":"как получить","difficolta":"facile|medio|difficile"}]':"null"},"simili":["похожий тайтл 1","...","..."],"youtube_query":"${title} официальный трейлер"}`;
+  }
+  return `Sei esperto di ${isGame?"videogiochi":"cinema e serie TV"}. Fornisci informazioni dettagliate su "${title}".
+Rispondi SOLO con JSON valido senza markdown, tutto in italiano:
+{"anno":"anno di uscita","regista":"regista o sviluppatore","cast":"attori principali separati da virgola","genere":"genere principale","durata":"durata in minuti per film, stagioni per serie, ore per giochi","rating_critica":"IMDb X.X/10 o Metacritic XX/100","trama":"trama completa 300-400 parole","origine":"storia della produzione 150-200 parole","teorie":[{"titolo":"nome teoria","descrizione":"descrizione 80-120 parole"},{"titolo":"...","descrizione":"..."},{"titolo":"...","descrizione":"..."}],"curiosita":["curiosita dettagliata 60-80 parole","...","...","..."],"da_notare":["dettaglio da notare","...","..."],"gameplay_tips":${isGame?'["consiglio gameplay dettagliato","...","..."]':"null"},"achievements":${isGame?'[{"nome":"nome","come":"come ottenerlo","difficolta":"facile|medio|difficile"}]':"null"},"simili":["titolo simile 1","...","..."],"youtube_query":"${title} trailer ufficiale italiano"}`;
 };
 
 const MISSION_PROMPT = (game, mission, step, history, lang) => {
@@ -1091,12 +1094,52 @@ export default function ReelBot() {
   if (!authed) return <LockScreen onUnlock={handleUnlock}/>;
 
   // ── SHARED CONTENT PANELS ──
+
+  // Chat message with poster extraction
+  const ChatMessage = ({m, onItemClick}) => {
+    const [posters,setPosters] = useState({});
+    useEffect(()=>{
+      if (m.role!=="assistant") return;
+      // Extract bold titles **Title (Year)** or **Title**
+      const matches = [...(m.content||"").matchAll(/\*\*([^*]{2,60}?)\*\*/g)];
+      const titles = [...new Set(matches.map(x=>x[1].replace(/\s*\(\d{4}\)\s*$/,"").trim()))].slice(0,6);
+      titles.forEach(title=>{
+        fetchPoster(title,"film").then(url=>{
+          if (url) setPosters(p=>({...p,[title]:url}));
+          else fetchPoster(title,"serie").then(u=>{ if(u) setPosters(p=>({...p,[title]:u})); });
+        });
+      });
+    },[m.content]);
+
+    const posterList = Object.entries(posters);
+
+    return (
+      <div style={{alignSelf:m.role==="user"?"flex-end":"flex-start",maxWidth:"84%",marginBottom:4,animation:"fadeIn .2s"}}>
+        <div style={{padding:"10px 14px",background:m.role==="user"?C.accent:C.surface,color:m.role==="user"?C.bg:C.body,fontFamily:SANS,fontSize:14,lineHeight:1.7,letterSpacing:.1,borderLeft:m.role==="assistant"?`2px solid ${C.border}`:"none"}}
+          dangerouslySetInnerHTML={{__html:mdLight(m.content)}}/>
+        {posterList.length>0&&(
+          <div style={{display:"flex",gap:6,marginTop:6,flexWrap:"wrap",paddingLeft:2}}>
+            {posterList.map(([title,url])=>(
+              <div key={title} onClick={()=>onItemClick({title,type:"film",genre:""})}
+                style={{cursor:"pointer",borderRadius:2,overflow:"hidden",width:48,height:68,flexShrink:0,position:"relative",group:true}}>
+                <img src={url} alt={title} style={{width:"100%",height:"100%",objectFit:"cover",display:"block",transition:"opacity .2s"}}/>
+                <div style={{position:"absolute",inset:0,background:"linear-gradient(to top, #000000cc 40%, transparent)",display:"flex",alignItems:"flex-end",padding:"3px 4px"}}>
+                  <span style={{fontFamily:MONO,fontSize:7,color:"#fff",lineHeight:1.2,letterSpacing:.3,overflow:"hidden",maxHeight:28}}>{title.substring(0,20)}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const ChatPanel = ({maxH}) => (
     <>
       <MoodSelector selected={mood} onSelect={setMood} t={t}/>
       <div style={{overflowY:"auto",display:"flex",flexDirection:"column",gap:2,paddingBottom:10,flex:1,maxHeight:maxH||undefined,scrollbarWidth:"none"}}>
         {(messages||[]).map((m,i)=>(
-          <div key={i} style={{alignSelf:m.role==="user"?"flex-end":"flex-start",maxWidth:"84%",padding:"10px 14px",animation:"fadeIn .2s",background:m.role==="user"?C.accent:C.surface,color:m.role==="user"?C.bg:C.body,fontFamily:SANS,fontSize:14,lineHeight:1.7,letterSpacing:.1,marginBottom:2,borderLeft:m.role==="assistant"?`2px solid ${C.border}`:"none"}} dangerouslySetInnerHTML={{__html:mdLight(m.content)}}/>
+          <ChatMessage key={i} m={m} onItemClick={setSelected}/>
         ))}
         {chatLoading&&<div style={{alignSelf:"flex-start",background:C.surface,padding:"10px 14px",borderLeft:`2px solid ${C.accent}`}}><span style={{fontFamily:MONO,fontSize:10,letterSpacing:2,color:C.accent,animation:"pulse 1s infinite"}}>...</span></div>}
         <div ref={endRef}/>
@@ -1272,7 +1315,7 @@ export default function ReelBot() {
                   <MoodSelector selected={mood} onSelect={setMood} t={t}/>
                   <div style={{overflowY:"auto",display:"flex",flexDirection:"column",gap:2,flex:1,paddingBottom:10,scrollbarWidth:"none"}}>
                     {(messages||[]).map((m,i)=>(
-                      <div key={i} style={{alignSelf:m.role==="user"?"flex-end":"flex-start",maxWidth:"76%",padding:"10px 14px",animation:"fadeIn .2s",background:m.role==="user"?C.accent:C.surface,color:m.role==="user"?C.bg:C.body,fontFamily:SANS,fontSize:14,lineHeight:1.75,letterSpacing:.1,marginBottom:2,borderLeft:m.role==="assistant"?`2px solid ${C.border}`:"none"}} dangerouslySetInnerHTML={{__html:mdLight(m.content)}}/>
+                      <ChatMessage key={i} m={m} onItemClick={setSelected}/>
                     ))}
                     {chatLoading&&<div style={{alignSelf:"flex-start",background:C.surface,padding:"10px 14px",borderLeft:`2px solid ${C.accent}`}}><span style={{fontFamily:MONO,fontSize:10,letterSpacing:2,color:C.accent,animation:"pulse 1s infinite"}}>...</span></div>}
                     <div ref={endRef}/>
