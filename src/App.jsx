@@ -58,22 +58,20 @@ const TMDB_IMG = "https://image.tmdb.org/t/p/w300";
 
 async function fetchTrailerYouTube(query) {
   try {
-    // Search YouTube via invidious (open API, no key needed)
     const r = await fetch(`https://vid.puffyan.us/api/v1/search?q=${encodeURIComponent(query)}&type=video&fields=videoId,title&hl=it`);
     if (!r.ok) throw new Error();
     const d = await r.json();
     const vid = d?.[0]?.videoId;
     return vid ? `https://www.youtube.com/embed/${vid}` : null;
   } catch {
-    // Fallback: return YouTube search URL
     return `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
   }
 }
 
-
+async function fetchPoster(title, type) {
   try {
     const endpoint = type === "gioco"
-      ? null // TMDB non ha giochi, usiamo gradiente
+      ? null
       : type === "serie"
         ? `https://api.themoviedb.org/3/search/tv?api_key=${TMDB_KEY}&query=${encodeURIComponent(title)}&language=it-IT`
         : `https://api.themoviedb.org/3/search/movie?api_key=${TMDB_KEY}&query=${encodeURIComponent(title)}&language=it-IT`;
