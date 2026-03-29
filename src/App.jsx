@@ -56,7 +56,21 @@ async function stSet(key, val) {
 const TMDB_KEY = "3808c106fa8d52adb5839faad1155f56";
 const TMDB_IMG = "https://image.tmdb.org/t/p/w300";
 
-async function fetchPoster(title, type) {
+async function fetchTrailerYouTube(query) {
+  try {
+    // Search YouTube via invidious (open API, no key needed)
+    const r = await fetch(`https://vid.puffyan.us/api/v1/search?q=${encodeURIComponent(query)}&type=video&fields=videoId,title&hl=it`);
+    if (!r.ok) throw new Error();
+    const d = await r.json();
+    const vid = d?.[0]?.videoId;
+    return vid ? `https://www.youtube.com/embed/${vid}` : null;
+  } catch {
+    // Fallback: return YouTube search URL
+    return `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
+  }
+}
+
+
   try {
     const endpoint = type === "gioco"
       ? null // TMDB non ha giochi, usiamo gradiente
@@ -111,7 +125,7 @@ const TR = {
     detail_loading2:"forum, teorie, curiosita, easter egg",
     detail_err:"Qualcosa e andato storto.",
     dtab_trama:"TRAMA", dtab_teorie:"TEORIE", dtab_fatti:"FATTI",
-    dtab_notare:"DA NOTARE", dtab_game:"GAMEPLAY",
+    dtab_notare:"DA NOTARE", dtab_game:"GAMEPLAY", dtab_trailer:"TRAILER",
     conn_err:"Errore di connessione. Riprovo...",
     conn_fail:"Connessione fallita.",
     api_ok:"CONNESSO", api_err:"ERRORE", api_busy:"...",
@@ -174,7 +188,7 @@ const TR = {
     detail_loading2:"форумы, теории, факты, пасхалки",
     detail_err:"Что-то пошло не так.",
     dtab_trama:"СЮЖЕТ", dtab_teorie:"ТЕОРИИ", dtab_fatti:"ФАКТЫ",
-    dtab_notare:"ВНИМАНИЕ", dtab_game:"ГЕЙМПЛЕЙ",
+    dtab_notare:"ВНИМАНИЕ", dtab_game:"ГЕЙМПЛЕЙ", dtab_trailer:"ТРЕЙЛЕР",
     conn_err:"Ошибка соединения. Повторяю...",
     conn_fail:"Соединение не удалось.",
     api_ok:"ПОДКЛЮЧЕНО", api_err:"ОШИБКА", api_busy:"...",
@@ -300,12 +314,16 @@ const CHAT_SYS = (lang, profiles, mood, active, moods) => {
   const recentOther = otherProf.library.filter(i=>i.addedAt).sort((a,b)=>new Date(b.addedAt)-new Date(a.addedAt)).slice(0,5).map(i=>`- ${i.title}${i.rating?" (★"+i.rating+")":""}`).join("\n");
 
   const persona = isRu
-    ? `Ты REELBOT. Говоришь с КИРОЙ. Её партнёр — АДАМ. ВСЕГДА отвечай по-русски. Ироничный, остроумный, конкретный.
-ПОИСК: Когда спрашивают о новостях, датах выхода, актёрах, обзорах или чём-то актуальном — ОБЯЗАТЕЛЬНО используй web_search. Ищи конкретно: название + год + "дата выхода" или "трейлер" или "новости". Включай реальные ссылки в ответ когда находишь.
-Учитывай вкусы обоих. Не предлагай уже просмотренное. Упоминай активность Адама когда уместно.`
-    : `Sei REELBOT. Parli con ADAM. La sua partner è KIRA. Parla SEMPRE in italiano. Ironico, brillante, concreto.
-RICERCA: Quando chiedono notizie, date di uscita, cast, recensioni o informazioni attuali — usa SEMPRE web_search. Cerca in modo specifico: titolo + anno + "data uscita" oppure "trailer" oppure "notizie". Includi link reali nella risposta quando li trovi.
-Considera i gusti di entrambi. Non riproporre titoli già visti. Menziona l'attività di Kira quando rilevante.`;
+    ? `Ты REELBOT — дружелюбный и внимательный помощник по кино, сериалам и играм. Говоришь с КИРОЙ, её партнёр АДАМ.
+ВСЕГДА отвечай по-русски. Тон: тёплый, уважительный, информативный. Давай развёрнутые ответы с конкретными деталями.
+Когда даёшь совет — объясняй почему именно этот выбор подходит. Структурируй ответы чётко.
+ПОИСК: Для новостей, дат выхода, трейлеров, актёров — используй web_search. Включай реальные ссылки.
+Упоминай что смотрел/играл Адам когда это помогает с советом. Не предлагай уже просмотренное.`
+    : `Sei REELBOT — assistente cordiale e attento per film, serie e videogiochi. Parli con ADAM, la sua partner è KIRA.
+Parla SEMPRE in italiano. Tono: caldo, rispettoso, informativo. Dai risposte dettagliate e complete.
+Quando consigli qualcosa — spiega sempre il perché, struttura le risposte in modo chiaro.
+RICERCA: Per notizie, date uscita, trailer, cast — usa web_search. Includi link reali nella risposta.
+Menziona cosa ha visto/giocato Kira quando aiuta con il consiglio. Non riproporre titoli già visti.`;
 
   const tag = isRu
     ? `Библиотека: [REEL:{"op":"add","dest":"library","profile":"tu|lei|entrambi","title":"НАЗВАНИЕ","type":"film|serie|gioco","status":"finito|in corso|abbandonato","genre":"horror|azione|commedia|thriller|fantasy|sci-fi|romantico|animazione|documentario|altro","rating":null,"hours":2}]
@@ -331,8 +349,11 @@ UMORE: ${moodHint}`;
 const DETAIL_PROMPT = (title, type, lang) => {
   const isRu = lang==="ru";
   const f=(it,ru)=>isRu?ru:it;
-  return `${isRu?`Ты эксперт по ${type==="gioco"?"видеоиграм":"кино"}. ТОЛЬКО валидный JSON, весь текст на русском. Ищи актуальную информацию о "${title}".`:`Sei esperto di ${type==="gioco"?"videogiochi":"cinema/serie TV"}. SOLO JSON valido, tutto in italiano. Cerca info aggiornate su "${title}".`}
-{"trama":"${f("250-350 parole","250-350 слов")}","origine":"${f("150-200 parole: nascita idea, eventi reali, set","150-200 слов: история создания, факты")}","teorie":[{"titolo":"...","descrizione":"${f("80-120 parole","80-120 слов")}"},{"titolo":"...","descrizione":"..."},{"titolo":"...","descrizione":"..."}],"curiosita":["${f("fatto 60-80 parole","факт 60-80 слов")}","...","...","..."],"da_notare":["${f("cosa notare","на что обратить внимание")}","...","..."],"gameplay_tips":${type==="gioco"?`["${f("consiglio","совет")}","...","...","..."]`:"null"},"achievements":${type==="gioco"?`[{"nome":"...","come":"...","difficolta":"facile|medio|difficile"}]`:"null"},"rating_critica":"Metacritic XX / IMDb X.X","simili":["...","...","..."]}`;
+  return `${isRu
+    ?`Ты эксперт по ${type==="gioco"?"видеоиграм":"кино и сериалам"}. Дай подробную информацию о "${title}". Отвечай ТОЛЬКО валидным JSON, весь текст на русском.`
+    :`Sei esperto di ${type==="gioco"?"videogiochi":"cinema e serie TV"}. Fornisci informazioni dettagliate su "${title}". Rispondi SOLO con JSON valido, tutto in italiano.`}
+
+{"anno":"${f("anno di uscita (solo numero)","год выхода (только число)")}","regista":"${f("regista/sviluppatore","режиссёр/разработчик")}","cast":"${f("attori principali separati da virgola","главные актёры через запятую")}","genere":"${f("genere principale","основной жанр")}","durata":"${f("durata in minuti per film, stagioni per serie, ore per giochi","длительность в минутах для фильмов, сезоны для сериалов, часы для игр")}","rating_critica":"${f("Metacritic XX/100 · IMDb X.X/10","Metacritic XX/100 · IMDb X.X/10")}","trama":"${f("trama completa e coinvolgente 300-400 parole","подробный сюжет 300-400 слов")}","origine":"${f("150-200 parole: come è nata, eventi reali ispiratori, curiosità di produzione","150-200 слов: история создания, реальные факты, закулисье")}","teorie":[{"titolo":"...","descrizione":"${f("teoria dettagliata 80-120 parole","подробная теория 80-120 слов")}"},{"titolo":"...","descrizione":"..."},{"titolo":"...","descrizione":"..."}],"curiosita":["${f("curiosità dettagliata 60-80 parole","интересный факт 60-80 слов")}","...","...","..."],"da_notare":["${f("dettaglio da notare durante la visione","деталь на которую стоит обратить внимание")}","...","..."],"gameplay_tips":${type==="gioco"?`["${f("consiglio gameplay dettagliato","подробный совет по геймплею")}","...","...","..."]`:"null"},"achievements":${type==="gioco"?`[{"nome":"...","come":"${f("spiegazione dettagliata","подробное объяснение")}","difficolta":"facile|medio|difficile"}]`:"null"},"simili":["${f("titolo simile 1","похожий тайтл 1")}","...","..."],"youtube_query":"${f(`${title} trailer ufficiale italiano`,"${title} официальный трейлер")}"}`;
 };
 
 const MISSION_PROMPT = (game, mission, step, history, lang) => {
@@ -413,26 +434,34 @@ const LibRow = ({item,onClick}) => {
     fetchPoster(item.title, item.type).then(url=>{ if(url) setPoster(url); });
   },[item.title,item.type]);
 
+  const statusLabel = { finito:"✓", "in corso":"…", abbandonato:"✕" };
+
   return (
     <div onClick={()=>onClick(item)} onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)}
-      style={{display:"flex",alignItems:"center",gap:12,padding:"8px 12px",cursor:"pointer",borderBottom:`1px solid ${C.border}`,background:hov?C.surface:"transparent",transition:"background .12s"}}>
-      {/* Poster thumbnail */}
-      <div style={{width:36,height:52,flexShrink:0,borderRadius:2,overflow:"hidden",background:C.border}}>
+      style={{display:"flex",alignItems:"center",gap:12,padding:"10px 12px",cursor:"pointer",borderBottom:`1px solid ${C.border}`,background:hov?C.surface:"transparent",transition:"background .12s"}}>
+      {/* Poster */}
+      <div style={{width:38,height:54,flexShrink:0,borderRadius:1,overflow:"hidden",background:C.surface,display:"flex",alignItems:"center",justifyContent:"center"}}>
         {poster
           ? <img src={poster} alt="" style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/>
-          : <div style={{width:"100%",height:"100%",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:MONO,fontSize:11,fontWeight:700,color:TYPE_COL[item.type]||C.muted}}>{TYPE_CHAR[item.type]}</div>
+          : <span style={{fontFamily:MONO,fontSize:10,fontWeight:700,color:TYPE_COL[item.type]||C.muted}}>{TYPE_CHAR[item.type]}</span>
         }
       </div>
+      {/* Info */}
       <div style={{flex:1,minWidth:0}}>
-        <div style={{fontFamily:SANS,fontSize:14,fontWeight:500,color:C.text,letterSpacing:.2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{item.title}</div>
-        <div style={{display:"flex",gap:8,marginTop:3,alignItems:"center"}}>
-          {item.genre&&<span style={{fontFamily:MONO,fontSize:8,color:C.dim,letterSpacing:1,textTransform:"uppercase"}}>{item.genre}</span>}
-          <span style={{fontFamily:MONO,fontSize:8,color:C.dim,letterSpacing:1}}>{STATUS_CH[item.status]||""}</span>
-          {item.rating&&<span style={{fontFamily:MONO,fontSize:9,color:C.muted}}>★ {item.rating}/10</span>}
+        <div style={{fontFamily:SANS,fontSize:14,fontWeight:600,color:C.text,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{item.title}</div>
+        <div style={{display:"flex",gap:8,marginTop:3,alignItems:"center",flexWrap:"wrap"}}>
+          <span style={{fontFamily:MONO,fontSize:8,color:TYPE_COL[item.type]||C.dim,letterSpacing:1}}>{item.type?.toUpperCase()}</span>
+          {item.genre&&<span style={{fontFamily:MONO,fontSize:8,color:C.dim,letterSpacing:1}}>{item.genre.toUpperCase()}</span>}
+          {item.status&&<span style={{fontFamily:MONO,fontSize:8,color:item.status==="finito"?C.green:item.status==="in corso"?C.accent:C.muted,letterSpacing:1}}>{statusLabel[item.status]||item.status}</span>}
+          {item.rating&&<span style={{fontFamily:MONO,fontSize:9,color:C.accent}}>★{item.rating}</span>}
+          {item.hours&&<span style={{fontFamily:MONO,fontSize:8,color:C.dim}}>{item.hours}h</span>}
         </div>
       </div>
-      <span style={{fontFamily:MONO,fontSize:9,color:C.dim,flexShrink:0}}>{item.profileLabel==="entrambi"?"T+L":item.profileLabel==="tu"?"T":"L"}</span>
-      {hov&&<span style={{fontFamily:MONO,fontSize:9,color:C.accent,letterSpacing:1.5,flexShrink:0}}>APRI</span>}
+      {/* Profile badge */}
+      <span style={{fontFamily:MONO,fontSize:8,color:C.dim,flexShrink:0,border:`1px solid ${C.border}`,padding:"1px 5px"}}>
+        {item.profileLabel==="entrambi"?"A+K":item.profileLabel==="tu"?"A":"K"}
+      </span>
+      {hov&&<span style={{fontFamily:MONO,fontSize:9,color:C.accent,letterSpacing:1.5,flexShrink:0}}>›</span>}
     </div>
   );
 };
@@ -485,82 +514,130 @@ const ProfileEditor = ({profiles,active,onSave,t}) => {
 /* ─── DETAIL MODAL ───────────────────────────────────── */
 const DetailModal = ({item,onClose,lang,onStatus}) => {
   const t = TR[lang]||TR.it;
-  const [tab,setTab]=useState("trama");
-  const [data,setData]=useState(null);
-  const [loading,setLoading]=useState(true);
-  const [err,setErr]=useState(false);
-  const [poster,setPoster]=useState(item.poster||null);
+  const [tab,setTab]       = useState("trama");
+  const [data,setData]     = useState(null);
+  const [loading,setLoading] = useState(true);
+  const [err,setErr]       = useState(false);
+  const [poster,setPoster] = useState(item.poster||null);
+  const [trailer,setTrailer] = useState(null); // embed URL or YT search URL
 
   useEffect(()=>{
     load();
-    if (!poster) fetchPoster(item.title,item.type).then(url=>{ if(url) setPoster(url); });
+    if (!poster) fetchPoster(item.title,item.type).then(u=>{ if(u) setPoster(u); });
   },[]);
+
+  useEffect(()=>{
+    if (!data?.youtube_query) return;
+    // Try invidious for embeddable player, fallback to YT search link
+    const q = data.youtube_query;
+    fetch(`https://vid.puffyan.us/api/v1/search?q=${encodeURIComponent(q)}&type=video&fields=videoId&hl=it`)
+      .then(r=>r.ok?r.json():null)
+      .then(d=>{ const id=d?.[0]?.videoId; setTrailer(id?`https://www.youtube.com/embed/${id}?rel=0`:`https://www.youtube.com/results?search_query=${encodeURIComponent(q)}`); })
+      .catch(()=>setTrailer(`https://www.youtube.com/results?search_query=${encodeURIComponent(q)}`));
+  },[data]);
+
   const load = async () => {
     setLoading(true); setErr(false);
     try {
-      // First call without search to get structured JSON reliably
-      const raw = await callClaude({
-        messages:[{role:"user",content:DETAIL_PROMPT(item.title,item.type,lang)}],
-        withSearch:false,
-        maxTokens:1400,
-        onStatus
-      });
+      const raw = await callClaude({messages:[{role:"user",content:DETAIL_PROMPT(item.title,item.type,lang)}],withSearch:false,maxTokens:1600,onStatus});
       const cleaned = raw.replace(/```json|```/g,"").trim();
-      if (!cleaned) throw new Error("empty response");
+      if (!cleaned) throw new Error("empty");
       setData(JSON.parse(cleaned));
-    } catch(e) {
-      // Retry without search on failure
+    } catch {
       try {
-        const raw2 = await callClaude({
-          messages:[{role:"user",content:DETAIL_PROMPT(item.title,item.type,lang)+" Rispondi SOLO con JSON valido."}],
-          withSearch:false,
-          maxTokens:1400,
-          onStatus
-        });
-        const cleaned2 = raw2.replace(/```json|```/g,"").trim();
-        setData(JSON.parse(cleaned2));
+        const raw2 = await callClaude({messages:[{role:"user",content:DETAIL_PROMPT(item.title,item.type,lang)+" Rispondi SOLO JSON valido."}],withSearch:false,maxTokens:1600,onStatus});
+        setData(JSON.parse(raw2.replace(/```json|```/g,"").trim()));
       } catch { setErr(true); }
     }
     setLoading(false);
   };
 
   const TABS=[
-    {id:"trama",label:t.dtab_trama},{id:"teorie",label:t.dtab_teorie},
-    {id:"fatti",label:t.dtab_fatti},{id:"notare",label:t.dtab_notare},
+    {id:"trama",label:t.dtab_trama},
+    {id:"teorie",label:t.dtab_teorie},
+    {id:"fatti",label:t.dtab_fatti},
+    {id:"notare",label:t.dtab_notare},
+    {id:"trailer",label:t.dtab_trailer||"TRAILER"},
     ...(item.type==="gioco"?[{id:"gameplay",label:t.dtab_game}]:[]),
   ];
 
+  const isEmbed = trailer?.includes("/embed/");
+
   return (
-    <div style={{position:"fixed",inset:0,background:"#000000cc",zIndex:200,display:"flex",alignItems:"flex-end",justifyContent:"center"}} onClick={onClose}>
-      <div onClick={e=>e.stopPropagation()} style={{background:C.bg,width:"100%",maxWidth:700,maxHeight:"88vh",display:"flex",flexDirection:"column",borderTop:`1px solid ${C.border}`,borderLeft:`1px solid ${C.border}`,borderRight:`1px solid ${C.border}`,animation:"slideUp .25s cubic-bezier(.16,1,.3,1)"}}>
-        <div style={{padding:"16px 20px",borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"flex-start",justifyContent:"space-between",flexShrink:0,gap:16}}>
+    <div style={{position:"fixed",inset:0,background:"#000000dd",zIndex:200,display:"flex",alignItems:"flex-end",justifyContent:"center"}} onClick={onClose}>
+      <div onClick={e=>e.stopPropagation()} style={{background:C.bg,width:"100%",maxWidth:720,maxHeight:"92vh",display:"flex",flexDirection:"column",borderTop:`1px solid ${C.border}`,borderLeft:`1px solid ${C.border}`,borderRight:`1px solid ${C.border}`,animation:"slideUp .25s cubic-bezier(.16,1,.3,1)"}}>
+
+        {/* ── HERO ── */}
+        <div style={{padding:"18px 20px",borderBottom:`1px solid ${C.border}`,display:"flex",gap:16,flexShrink:0}}>
           {/* Poster */}
-          {poster && (
-            <div style={{width:56,height:80,flexShrink:0,borderRadius:2,overflow:"hidden",background:C.border}}>
-              <img src={poster} alt="" style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/>
-            </div>
-          )}
-          <div style={{flex:1,minWidth:0}}>
-            <div style={{fontFamily:MONO,fontSize:10,letterSpacing:2,color:TYPE_COL[item.type]||C.muted,marginBottom:6}}>{TYPE_CHAR[item.type]} — {item.type.toUpperCase()}{item.genre?` / ${item.genre.toUpperCase()}`:""}</div>
-            <div style={{fontFamily:SANS,fontSize:22,fontWeight:900,color:C.text,letterSpacing:-.5,lineHeight:1.1}}>{item.title}</div>
-            {data?.rating_critica&&<div style={{fontFamily:MONO,fontSize:10,color:C.muted,marginTop:6,letterSpacing:.5}}>{data.rating_critica}</div>}
+          <div style={{width:70,height:100,flexShrink:0,borderRadius:2,overflow:"hidden",background:C.surface,display:"flex",alignItems:"center",justifyContent:"center"}}>
+            {poster
+              ? <img src={poster} alt="" style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/>
+              : <span style={{fontFamily:MONO,fontSize:18,fontWeight:700,color:TYPE_COL[item.type]||C.muted}}>{TYPE_CHAR[item.type]}</span>
+            }
           </div>
-          <button onClick={onClose} style={{background:"transparent",border:`1px solid ${C.border}`,color:C.muted,cursor:"pointer",fontFamily:MONO,fontSize:11,padding:"6px 10px",letterSpacing:1,flexShrink:0}}>ESC</button>
+          {/* Meta */}
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{fontFamily:MONO,fontSize:9,letterSpacing:2,color:TYPE_COL[item.type]||C.muted,marginBottom:4}}>
+              {item.type.toUpperCase()}{item.genre?` · ${item.genre.toUpperCase()}`:""}
+            </div>
+            <div style={{fontFamily:SANS,fontSize:20,fontWeight:900,color:C.text,lineHeight:1.15,marginBottom:6}}>{item.title}</div>
+            <div style={{display:"flex",flexWrap:"wrap",gap:8,alignItems:"center",marginBottom:4}}>
+              {data?.anno&&<span style={{fontFamily:MONO,fontSize:9,color:C.muted}}>{data.anno}</span>}
+              {data?.regista&&<span style={{fontFamily:MONO,fontSize:9,color:C.muted}}>· {data.regista}</span>}
+              {data?.durata&&<span style={{fontFamily:MONO,fontSize:9,color:C.dim}}>· {data.durata}</span>}
+            </div>
+            {data?.rating_critica&&<div style={{fontFamily:MONO,fontSize:9,color:C.accent,letterSpacing:.5}}>{data.rating_critica}</div>}
+            {data?.cast&&<div style={{fontFamily:SANS,fontSize:11,color:C.dim,marginTop:5,lineHeight:1.5}}>{data.cast}</div>}
+            {data?.simili?.length>0&&<div style={{display:"flex",gap:5,flexWrap:"wrap",marginTop:8}}>{data.simili.map((s,i)=><span key={i} style={{fontFamily:MONO,fontSize:8,padding:"2px 7px",border:`1px solid ${C.border}`,color:C.dim}}>{s}</span>)}</div>}
+          </div>
+          <button onClick={onClose} style={{background:"transparent",border:`1px solid ${C.border}`,color:C.muted,cursor:"pointer",fontFamily:MONO,fontSize:10,padding:"6px 10px",flexShrink:0,alignSelf:"flex-start"}}>ESC</button>
         </div>
-        <div style={{display:"flex",borderBottom:`1px solid ${C.border}`,flexShrink:0}}>
-          {TABS.map(tb=><button key={tb.id} onClick={()=>setTab(tb.id)} style={{flex:1,padding:"10px 4px",border:"none",cursor:"pointer",background:"transparent",fontFamily:MONO,fontSize:9,letterSpacing:2,color:tab===tb.id?C.accent:C.dim,borderBottom:tab===tb.id?`2px solid ${C.accent}`:"2px solid transparent",transition:"all .15s"}}>{tb.label}</button>)}
+
+        {/* ── TABS ── */}
+        <div style={{display:"flex",borderBottom:`1px solid ${C.border}`,flexShrink:0,overflowX:"auto",scrollbarWidth:"none"}}>
+          {TABS.map(tb=>(
+            <button key={tb.id} onClick={()=>setTab(tb.id)} style={{flexShrink:0,padding:"10px 14px",border:"none",cursor:"pointer",background:"transparent",fontFamily:MONO,fontSize:9,letterSpacing:1.5,color:tab===tb.id?C.accent:C.dim,borderBottom:tab===tb.id?`2px solid ${C.accent}`:"2px solid transparent",transition:"all .15s"}}>
+              {tb.label}
+            </button>
+          ))}
         </div>
-        <div style={{flex:1,overflowY:"auto",scrollbarWidth:"none",padding:"20px"}}>
-          {loading&&<div style={{padding:"40px 0",textAlign:"center"}}><div style={{fontFamily:MONO,fontSize:10,letterSpacing:2,color:C.muted,animation:"pulse 1.5s infinite"}}>{t.detail_loading} {item.title}...<br/><span style={{color:C.dim,marginTop:8,display:"block"}}>{t.detail_loading2}</span></div></div>}
+
+        {/* ── BODY ── */}
+        <div style={{flex:1,overflowY:"auto",padding:"20px",scrollbarWidth:"none"}}>
+          {loading&&<div style={{padding:"50px 0",textAlign:"center"}}><div style={{fontFamily:MONO,fontSize:10,letterSpacing:2,color:C.muted,animation:"pulse 1.5s infinite"}}>{t.detail_loading} {item.title}...<br/><span style={{color:C.dim,display:"block",marginTop:8,fontSize:9}}>{t.detail_loading2}</span></div></div>}
           {err&&<div style={{padding:"40px 0",textAlign:"center"}}><div style={{fontFamily:MONO,fontSize:11,color:C.muted,marginBottom:16}}>{t.detail_err}</div><button onClick={load} style={{fontFamily:MONO,fontSize:10,letterSpacing:2,padding:"8px 20px",border:`1px solid ${C.border}`,background:"transparent",color:C.text,cursor:"pointer"}}>{t.retry}</button></div>}
           {!loading&&!err&&data&&<>
-            {tab==="trama"&&<div><p style={{fontFamily:SANS,fontSize:14,lineHeight:1.9,color:C.body,margin:"0 0 20px"}} dangerouslySetInnerHTML={{__html:mdLight(data.trama)}}/>{data.origine&&<><Divider label={t.detail_born}/><p style={{fontFamily:SANS,fontSize:13,lineHeight:1.8,color:C.muted,margin:0}}>{data.origine}</p></>}{data.simili?.length>0&&<><Divider label={t.detail_similar}/><div style={{display:"flex",flexWrap:"wrap",gap:6}}>{data.simili.map((s,i)=><span key={i} style={{fontFamily:MONO,fontSize:10,letterSpacing:1,padding:"4px 10px",border:`1px solid ${C.border}`,color:C.muted}}>{s}</span>)}</div></>}</div>}
-            {tab==="teorie"&&<div>{(data.teorie||[]).map((th,i)=><div key={i} style={{borderBottom:`1px solid ${C.border}`,paddingBottom:16,marginBottom:16}}><div style={{fontFamily:MONO,fontSize:9,letterSpacing:2,color:C.accent,marginBottom:8}}>T{i+1} — {th.titolo?.toUpperCase()}</div><p style={{fontFamily:SANS,fontSize:13,lineHeight:1.8,color:C.body,margin:0}}>{th.descrizione}</p></div>)}</div>}
-            {tab==="fatti"&&<div>{(data.curiosita||[]).map((c,i)=><div key={i} style={{display:"flex",gap:16,borderBottom:`1px solid ${C.border}`,padding:"12px 0"}}><span style={{fontFamily:MONO,fontSize:10,color:C.dim,minWidth:20,letterSpacing:1}}>{String(i+1).padStart(2,"0")}</span><p style={{fontFamily:SANS,fontSize:13,lineHeight:1.8,color:C.body,margin:0}}>{c}</p></div>)}</div>}
-            {tab==="notare"&&<div>{(data.da_notare||[]).map((n,i)=><div key={i} style={{display:"flex",gap:16,borderBottom:`1px solid ${C.border}`,padding:"12px 0"}}><span style={{fontFamily:MONO,fontSize:10,color:C.accent,minWidth:20}}>→</span><p style={{fontFamily:SANS,fontSize:13,lineHeight:1.8,color:C.body,margin:0}}>{n}</p></div>)}</div>}
+            {tab==="trama"&&<div>
+              <p style={{fontFamily:SANS,fontSize:14,lineHeight:1.95,color:C.body,margin:"0 0 20px"}} dangerouslySetInnerHTML={{__html:mdLight(data.trama)}}/>
+              {data.origine&&<><Divider label={t.detail_born}/><p style={{fontFamily:SANS,fontSize:13,lineHeight:1.8,color:C.muted,margin:0}}>{data.origine}</p></>}
+            </div>}
+            {tab==="teorie"&&<div>{(data.teorie||[]).map((th,i)=><div key={i} style={{borderBottom:`1px solid ${C.border}`,paddingBottom:16,marginBottom:16}}><div style={{fontFamily:MONO,fontSize:9,letterSpacing:2,color:C.accent,marginBottom:8}}>T{i+1} — {(th.titolo||"").toUpperCase()}</div><p style={{fontFamily:SANS,fontSize:13,lineHeight:1.8,color:C.body,margin:0}}>{th.descrizione}</p></div>)}</div>}
+            {tab==="fatti"&&<div>{(data.curiosita||[]).map((c,i)=><div key={i} style={{display:"flex",gap:16,borderBottom:`1px solid ${C.border}`,padding:"12px 0"}}><span style={{fontFamily:MONO,fontSize:10,color:C.dim,minWidth:24,letterSpacing:1}}>{String(i+1).padStart(2,"0")}</span><p style={{fontFamily:SANS,fontSize:13,lineHeight:1.8,color:C.body,margin:0}}>{c}</p></div>)}</div>}
+            {tab==="notare"&&<div>{(data.da_notare||[]).map((n,i)=><div key={i} style={{display:"flex",gap:16,borderBottom:`1px solid ${C.border}`,padding:"12px 0"}}><span style={{fontFamily:MONO,fontSize:10,color:C.accent,minWidth:24}}>→</span><p style={{fontFamily:SANS,fontSize:13,lineHeight:1.8,color:C.body,margin:0}}>{n}</p></div>)}</div>}
+            {tab==="trailer"&&<div>
+              {isEmbed ? (
+                <div style={{position:"relative",paddingBottom:"56.25%",height:0,overflow:"hidden",background:C.surface,marginBottom:12}}>
+                  <iframe src={trailer} title="trailer" frameBorder="0"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    allowFullScreen
+                    style={{position:"absolute",top:0,left:0,width:"100%",height:"100%"}}/>
+                </div>
+              ) : trailer ? (
+                <div style={{padding:"40px 0",textAlign:"center"}}>
+                  <div style={{fontFamily:MONO,fontSize:9,color:C.dim,letterSpacing:2,marginBottom:20}}>PREVIEW NON DISPONIBILE</div>
+                  <a href={trailer} target="_blank" rel="noopener noreferrer"
+                    style={{fontFamily:MONO,fontSize:10,letterSpacing:2,padding:"12px 24px",border:`1px solid ${C.accent}`,color:C.accent,textDecoration:"none",display:"inline-block"}}>
+                    APRI TRAILER SU YOUTUBE →
+                  </a>
+                </div>
+              ) : (
+                <div style={{padding:"40px 0",textAlign:"center",fontFamily:MONO,fontSize:10,color:C.dim,letterSpacing:2,animation:"pulse 1s infinite"}}>RICERCA TRAILER...</div>
+              )}
+            </div>}
             {tab==="gameplay"&&item.type==="gioco"&&<div>
               {data.gameplay_tips?.length>0&&<><div style={{fontFamily:MONO,fontSize:9,letterSpacing:2,color:C.green,marginBottom:12}}>{t.detail_tips}</div>{data.gameplay_tips.map((tip,i)=><div key={i} style={{display:"flex",gap:16,borderBottom:`1px solid ${C.border}`,padding:"10px 0"}}><span style={{fontFamily:MONO,fontSize:10,color:C.green,minWidth:20}}>+</span><p style={{fontFamily:SANS,fontSize:13,lineHeight:1.8,color:C.body,margin:0}}>{tip}</p></div>)}</>}
-              {data.achievements?.length>0&&<><Divider label={t.detail_ach}/>{data.achievements.map((a,i)=>{const dc={facile:[C.green,"E"],medio:[C.accent,"M"],difficile:[C.red,"H"]};const[col,ch]=dc[a.difficolta]||[C.muted,"?"];return <div key={i} style={{borderBottom:`1px solid ${C.border}`,padding:"10px 0"}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><span style={{fontFamily:MONO,fontSize:11,color:C.text,letterSpacing:.5}}>{a.nome}</span><span style={{fontFamily:MONO,fontSize:9,color:col,border:`1px solid ${col}`,padding:"1px 6px"}}>{ch}</span></div><p style={{fontFamily:SANS,fontSize:12,color:C.muted,margin:0,lineHeight:1.6}}>{a.come}</p></div>;})}}</>}
+              {data.achievements?.length>0&&<><Divider label={t.detail_ach}/>{data.achievements.map((a,i)=>{const dc={facile:[C.green,"E"],medio:[C.accent,"M"],difficile:[C.red,"H"]};const[col,ch]=dc[a.difficolta]||[C.muted,"?"];return <div key={i} style={{borderBottom:`1px solid ${C.border}`,padding:"10px 0"}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><span style={{fontFamily:MONO,fontSize:11,color:C.text}}>{a.nome}</span><span style={{fontFamily:MONO,fontSize:9,color:col,border:`1px solid ${col}`,padding:"1px 6px"}}>{ch}</span></div><p style={{fontFamily:SANS,fontSize:12,color:C.muted,margin:0,lineHeight:1.6}}>{a.come}</p></div>;})}}</> }
             </div>}
           </>}
         </div>
