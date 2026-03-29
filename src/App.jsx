@@ -57,15 +57,19 @@ const TMDB_KEY = "3808c106fa8d52adb5839faad1155f56";
 const TMDB_IMG = "https://image.tmdb.org/t/p/w300";
 
 async function fetchTrailerYouTube(query) {
+  // Use YouTube nocookie embed search — always available, no API key needed
+  const encoded = encodeURIComponent(query);
+  // Try invidious first for real embed
   try {
-    const r = await fetch(`https://vid.puffyan.us/api/v1/search?q=${encodeURIComponent(query)}&type=video&fields=videoId,title&hl=it`);
-    if (!r.ok) throw new Error();
-    const d = await r.json();
-    const vid = d?.[0]?.videoId;
-    return vid ? `https://www.youtube.com/embed/${vid}` : null;
-  } catch {
-    return `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
-  }
+    const r = await fetch(`https://iv.ggtyler.dev/api/v1/search?q=${encoded}&type=video&fields=videoId&hl=it`, {signal: AbortSignal.timeout(4000)});
+    if (r.ok) {
+      const d = await r.json();
+      const id = d?.[0]?.videoId;
+      if (id) return `https://www.youtube-nocookie.com/embed/${id}?rel=0&autoplay=0`;
+    }
+  } catch {}
+  // Fallback: YouTube search link
+  return `https://www.youtube.com/results?search_query=${encoded}`;
 }
 
 async function fetchPoster(title, type) {
@@ -539,15 +543,21 @@ const DetailModal = ({item,onClose,lang,onStatus}) => {
 
   const load = async () => {
     setLoading(true); setErr(false);
+    const parse = (raw) => {
+      const s = raw.replace(/```json|```/g,"").trim();
+      // Find the first { and last } to extract JSON even if there's extra text
+      const start = s.indexOf("{");
+      const end = s.lastIndexOf("}");
+      if (start===-1||end===-1) throw new Error("no json");
+      return JSON.parse(s.substring(start, end+1));
+    };
     try {
-      const raw = await callClaude({messages:[{role:"user",content:DETAIL_PROMPT(item.title,item.type,lang)}],withSearch:false,maxTokens:1600,onStatus});
-      const cleaned = raw.replace(/```json|```/g,"").trim();
-      if (!cleaned) throw new Error("empty");
-      setData(JSON.parse(cleaned));
+      const raw = await callClaude({messages:[{role:"user",content:DETAIL_PROMPT(item.title,item.type,lang)}],withSearch:false,maxTokens:1800,onStatus});
+      setData(parse(raw));
     } catch {
       try {
-        const raw2 = await callClaude({messages:[{role:"user",content:DETAIL_PROMPT(item.title,item.type,lang)+" Rispondi SOLO JSON valido."}],withSearch:false,maxTokens:1600,onStatus});
-        setData(JSON.parse(raw2.replace(/```json|```/g,"").trim()));
+        const raw2 = await callClaude({messages:[{role:"user",content:DETAIL_PROMPT(item.title,item.type,lang)+"\n\nIMPORTANTE: Rispondi SOLO con il JSON, nessun testo prima o dopo."}],withSearch:false,maxTokens:1800,onStatus});
+        setData(parse(raw2));
       } catch { setErr(true); }
     }
     setLoading(false);
@@ -1095,14 +1105,14 @@ export default function ReelBot() {
 
   // ── SHARED CONTENT PANELS ──
 
+
   // Chat message with poster extraction
   const ChatMessage = ({m, onItemClick}) => {
     const [posters,setPosters] = useState({});
     useEffect(()=>{
       if (m.role!=="assistant") return;
-      // Extract bold titles **Title (Year)** or **Title**
       const matches = [...(m.content||"").matchAll(/\*\*([^*]{2,60}?)\*\*/g)];
-      const titles = [...new Set(matches.map(x=>x[1].replace(/\s*\(\d{4}\)\s*$/,"").trim()))].slice(0,6);
+      const titles = [...new Set(matches.map(x=>x[1].replace(/\s*\(\d{4}\)\s*$/,"").trim()))].slice(0,8);
       titles.forEach(title=>{
         fetchPoster(title,"film").then(url=>{
           if (url) setPosters(p=>({...p,[title]:url}));
@@ -1114,18 +1124,24 @@ export default function ReelBot() {
     const posterList = Object.entries(posters);
 
     return (
-      <div style={{alignSelf:m.role==="user"?"flex-end":"flex-start",maxWidth:"84%",marginBottom:4,animation:"fadeIn .2s"}}>
-        <div style={{padding:"10px 14px",background:m.role==="user"?C.accent:C.surface,color:m.role==="user"?C.bg:C.body,fontFamily:SANS,fontSize:14,lineHeight:1.7,letterSpacing:.1,borderLeft:m.role==="assistant"?`2px solid ${C.border}`:"none"}}
+      <div style={{alignSelf:m.role==="user"?"flex-end":"flex-start",maxWidth:"90%",marginBottom:6,animation:"fadeIn .2s"}}>
+        {/* Message bubble */}
+        <div style={{padding:"12px 14px",background:m.role==="user"?C.accent:C.surface,color:m.role==="user"?C.bg:C.body,fontFamily:SANS,fontSize:14,lineHeight:1.7,letterSpacing:.1,borderLeft:m.role==="assistant"?`2px solid ${C.border}`:"none"}}
           dangerouslySetInnerHTML={{__html:mdLight(m.content)}}/>
+        {/* Posters — integrated below bubble, same width */}
         {posterList.length>0&&(
-          <div style={{display:"flex",gap:6,marginTop:6,flexWrap:"wrap",paddingLeft:2}}>
+          <div style={{display:"flex",gap:8,marginTop:2,flexWrap:"nowrap",overflowX:"auto",scrollbarWidth:"none",paddingBottom:2}}>
             {posterList.map(([title,url])=>(
               <div key={title} onClick={()=>onItemClick({title,type:"film",genre:""})}
-                style={{cursor:"pointer",borderRadius:2,overflow:"hidden",width:48,height:68,flexShrink:0,position:"relative",group:true}}>
-                <img src={url} alt={title} style={{width:"100%",height:"100%",objectFit:"cover",display:"block",transition:"opacity .2s"}}/>
-                <div style={{position:"absolute",inset:0,background:"linear-gradient(to top, #000000cc 40%, transparent)",display:"flex",alignItems:"flex-end",padding:"3px 4px"}}>
-                  <span style={{fontFamily:MONO,fontSize:7,color:"#fff",lineHeight:1.2,letterSpacing:.3,overflow:"hidden",maxHeight:28}}>{title.substring(0,20)}</span>
+                title={title}
+                style={{cursor:"pointer",flexShrink:0,width:90,height:130,position:"relative",overflow:"hidden",borderRadius:2,boxShadow:"0 2px 12px #00000066",transition:"transform .15s"}}
+                onMouseEnter={e=>e.currentTarget.style.transform="scale(1.04)"}
+                onMouseLeave={e=>e.currentTarget.style.transform="scale(1)"}>
+                <img src={url} alt={title} style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/>
+                <div style={{position:"absolute",bottom:0,left:0,right:0,background:"linear-gradient(transparent,#000000ee)",padding:"20px 6px 6px"}}>
+                  <div style={{fontFamily:MONO,fontSize:8,color:"#fff",letterSpacing:.5,lineHeight:1.3,overflow:"hidden",maxHeight:24}}>{title.substring(0,22)}</div>
                 </div>
+                <div style={{position:"absolute",top:6,right:6,background:C.accent,borderRadius:1,padding:"2px 5px",fontFamily:MONO,fontSize:7,color:C.bg,letterSpacing:1}}>›</div>
               </div>
             ))}
           </div>
