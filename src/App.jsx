@@ -91,38 +91,45 @@ async function fetchTrailerYouTube(query) {
   return `https://www.youtube.com/results?search_query=${encoded}`;
 }
 
-/* ─── RAWG API (game covers) ─────────────────────────── */
-const RAWG_KEY = ""; // Free tier works without key for basic searches
-
 async function fetchGameCover(title) {
   try {
-    const r = await fetch(`https://api.rawg.io/api/games?search=${encodeURIComponent(title)}&page_size=1&key=${RAWG_KEY}`);
-    if (!r.ok) return null;
-    const d = await r.json();
-    return d?.results?.[0]?.background_image || null;
-  } catch { return null; }
+    // Try RAWG first
+    const r = await fetch(`https://api.rawg.io/api/games?search=${encodeURIComponent(title)}&page_size=1`);
+    if (r.ok) {
+      const d = await r.json();
+      const img = d?.results?.[0]?.background_image;
+      if (img) return img;
+    }
+  } catch {}
+  // Fallback: try IGDB via free proxy
+  try {
+    const r2 = await fetch(`https://api.rawg.io/api/games?search=${encodeURIComponent(title)}&page_size=3`);
+    if (r2.ok) {
+      const d2 = await r2.json();
+      // Find best match
+      const match = d2?.results?.find(g=>g.name?.toLowerCase().includes(title.toLowerCase().substring(0,6)));
+      if (match?.background_image) return match.background_image;
+    }
+  } catch {}
+  return null;
 }
 
 async function fetchPoster(title, type) {
   try {
-    // Games → RAWG
     if (type === "gioco") return await fetchGameCover(title);
-    // Series → TMDB TV
-    if (type === "serie") {
-      const r = await fetch(`https://api.themoviedb.org/3/search/tv?api_key=${TMDB_KEY}&query=${encodeURIComponent(title)}&language=it-IT`);
-      const d = await r.json();
-      const path = d?.results?.[0]?.poster_path;
-      return path ? `${TMDB_IMG}${path}` : null;
-    }
-    // Films → TMDB movie
-    const r = await fetch(`https://api.themoviedb.org/3/search/movie?api_key=${TMDB_KEY}&query=${encodeURIComponent(title)}&language=it-IT`);
-    const d = await r.json();
-    const path = d?.results?.[0]?.poster_path;
+    // Try both TMDB endpoints in parallel for speed
+    const lang = "it-IT";
+    const [movieRes, tvRes] = await Promise.allSettled([
+      fetch(`https://api.themoviedb.org/3/search/movie?api_key=${TMDB_KEY}&query=${encodeURIComponent(title)}&language=${lang}`).then(r=>r.json()),
+      type === "serie" ? fetch(`https://api.themoviedb.org/3/search/tv?api_key=${TMDB_KEY}&query=${encodeURIComponent(title)}&language=${lang}`).then(r=>r.json()) : Promise.resolve(null),
+    ]);
+    // Pick best result
+    const moviePath = movieRes.status==="fulfilled" ? movieRes.value?.results?.[0]?.poster_path : null;
+    const tvPath = tvRes.status==="fulfilled" && tvRes.value ? tvRes.value?.results?.[0]?.poster_path : null;
+    const path = type==="serie" ? (tvPath||moviePath) : (moviePath||tvPath);
     return path ? `${TMDB_IMG}${path}` : null;
   } catch { return null; }
 }
-
-
 const TR = {
   it: {
     lang:"IT",
@@ -321,10 +328,13 @@ async function callClaude({ system, messages, withSearch=false, maxTokens=1400, 
 
 /* ─── HELPERS ────────────────────────────────────────── */
 function parseReel(text) {
-  const m = text.match(/\[REEL:([\s\S]*?)\]/);
-  if (!m) return { clean:text, action:null };
-  try { return { clean:text.replace(/\[REEL:[\s\S]*?\]/,"").trim(), action:JSON.parse(m[1]) }; }
-  catch { return { clean:text, action:null }; }
+  // Extract ALL [REEL:...] tags and remove them all
+  const actions = [];
+  const clean = (text||"").replace(/\[REEL:([\s\S]*?)\]/g, (_, json) => {
+    try { actions.push(JSON.parse(json)); } catch {}
+    return "";
+  }).trim();
+  return { clean, action: actions[0]||null, actions };
 }
 async function fileToB64(file) {
   return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result.split(",")[1]); r.onerror=rej; r.readAsDataURL(file); });
@@ -1125,8 +1135,8 @@ export default function ReelBot() {
         messages:next.map(m=>({role:m.role,content:m.content})),
         withSearch:true, maxTokens:1000, onStatus:setApiStatus,
       });
-      const {clean,action}=parseReel(raw||t.conn_fail);
-      applyAction(action);
+      const {clean,actions}=parseReel(raw||t.conn_fail);
+      actions.forEach(action=>applyAction(action));
       const final=[...next,{role:"assistant",content:clean}];
       setChats(prev=>({...prev,[active]:final}));
       stSet(chatKey(active), final.slice(-MAX_CHAT_STORED));
@@ -1179,25 +1189,33 @@ export default function ReelBot() {
     const [posters,setPosters] = useState({});
     const isUser = m.role==="user";
 
-    // Detect type from content context — default film, but try to guess game
+    // In-memory poster cache for speed (shared across messages)
     const guessType = (title, content) => {
       const lower = (content||"").toLowerCase();
-      if (lower.includes("gioco") || lower.includes("game") || lower.includes("игр")) return "gioco";
+      if (lower.includes("gioco") || lower.includes("game") || lower.includes("videogioco") || lower.includes("игр")) return "gioco";
+      if (lower.includes("serie") || lower.includes("сериал")) return "serie";
       return "film";
     };
 
-    // Parse rows: "- **Title (Year)** - description"
+    // Parse rows — handles ALL bot formats:
+    // "- **Title (2012)** - desc", "📽️ **Title** desc", "**Title** - desc", etc.
     const parseRows = (content) => {
       const rows = [];
       (content||"").split("\n").forEach(line => {
-        const match = line.match(/^[-–•]\s*\*\*([^*]+)\*\*\s*[-–]?\s*(.*)/);
-        if (match) rows.push({
-          raw: line,
-          title: match[1].replace(/\s*\(\d{4}\)\s*$/,"").replace(/\s*[-–]\s*\d{4}$/,"").trim(),
-          fullTitle: match[1].trim(),
-          desc: match[2].trim(),
-          type: guessType(match[1], content),
-        });
+        // Skip obvious category headers (e.g. "**PER TE DA SOLO:**")
+        const headerCheck = line.match(/^\*\*([^*]+)\*\*\s*[:\-]?\s*$/);
+        if (headerCheck && headerCheck[1].trim().length < 50) return;
+        // Match any line containing **Title** with or without prefix
+        const match = line.match(/^[^*]*\*\*([^*]{2,80})\*\*\s*[-–]?\s*(.*)/);
+        if (!match) return;
+        const fullTitle = match[1].trim();
+        const desc = match[2].trim();
+        const cleanedTitle = fullTitle
+          .replace(/\s*\(\d{4}\)\s*$/,"")
+          .replace(/\s*[-–]\s*\d{4}$/,"")
+          .trim();
+        if (cleanedTitle.length < 2) return;
+        rows.push({ raw: line, title: cleanedTitle, fullTitle, desc, type: guessType(fullTitle, content) });
       });
       return rows;
     };
@@ -1207,11 +1225,27 @@ export default function ReelBot() {
     useEffect(()=>{
       if (isUser || rows.length===0) return;
       rows.forEach(({title, type})=>{
+        // Check in-memory cache first
+        if (window._posterCache?.[title]) {
+          setPosters(p=>({...p,[title]:window._posterCache[title]}));
+          return;
+        }
         fetchPoster(title, type).then(url=>{
-          if (url) { setPosters(p=>({...p,[title]:url})); return; }
-          // fallback: try film if was game and vice versa
-          const fallback = type==="gioco" ? "film" : "gioco";
-          fetchPoster(title, fallback).then(u=>{ if(u) setPosters(p=>({...p,[title]:u})); });
+          if (url) {
+            window._posterCache = window._posterCache||{};
+            window._posterCache[title] = url;
+            setPosters(p=>({...p,[title]:url}));
+            return;
+          }
+          // Fallback: try serie then film
+          const fallback = type==="gioco"?"film":type==="film"?"serie":"film";
+          fetchPoster(title, fallback).then(u=>{
+            if(u) {
+              window._posterCache = window._posterCache||{};
+              window._posterCache[title] = u;
+              setPosters(p=>({...p,[title]:u}));
+            }
+          });
         });
       });
     },[m.content]);
