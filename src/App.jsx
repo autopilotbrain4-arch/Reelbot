@@ -91,15 +91,31 @@ async function fetchTrailerYouTube(query) {
   return `https://www.youtube.com/results?search_query=${encoded}`;
 }
 
+/* ─── RAWG API (game covers) ─────────────────────────── */
+const RAWG_KEY = ""; // Free tier works without key for basic searches
+
+async function fetchGameCover(title) {
+  try {
+    const r = await fetch(`https://api.rawg.io/api/games?search=${encodeURIComponent(title)}&page_size=1&key=${RAWG_KEY}`);
+    if (!r.ok) return null;
+    const d = await r.json();
+    return d?.results?.[0]?.background_image || null;
+  } catch { return null; }
+}
+
 async function fetchPoster(title, type) {
   try {
-    const endpoint = type === "gioco"
-      ? null
-      : type === "serie"
-        ? `https://api.themoviedb.org/3/search/tv?api_key=${TMDB_KEY}&query=${encodeURIComponent(title)}&language=it-IT`
-        : `https://api.themoviedb.org/3/search/movie?api_key=${TMDB_KEY}&query=${encodeURIComponent(title)}&language=it-IT`;
-    if (!endpoint) return null;
-    const r = await fetch(endpoint);
+    // Games → RAWG
+    if (type === "gioco") return await fetchGameCover(title);
+    // Series → TMDB TV
+    if (type === "serie") {
+      const r = await fetch(`https://api.themoviedb.org/3/search/tv?api_key=${TMDB_KEY}&query=${encodeURIComponent(title)}&language=it-IT`);
+      const d = await r.json();
+      const path = d?.results?.[0]?.poster_path;
+      return path ? `${TMDB_IMG}${path}` : null;
+    }
+    // Films → TMDB movie
+    const r = await fetch(`https://api.themoviedb.org/3/search/movie?api_key=${TMDB_KEY}&query=${encodeURIComponent(title)}&language=it-IT`);
     const d = await r.json();
     const path = d?.results?.[0]?.poster_path;
     return path ? `${TMDB_IMG}${path}` : null;
@@ -1158,93 +1174,105 @@ export default function ReelBot() {
 
   // ── SHARED CONTENT PANELS ──
 
-
-  // ChatMessage — film recommendations rendered as rows with poster + text
+  // ChatMessage — Apple-style bubbles, film rows with poster RIGHT
   const ChatMessage = ({m, onItemClick}) => {
     const [posters,setPosters] = useState({});
     const isUser = m.role==="user";
 
-    // Parse film entries: **Title (Year)** - description
-    const parseFilmRows = (content) => {
+    // Detect type from content context — default film, but try to guess game
+    const guessType = (title, content) => {
+      const lower = (content||"").toLowerCase();
+      if (lower.includes("gioco") || lower.includes("game") || lower.includes("игр")) return "gioco";
+      return "film";
+    };
+
+    // Parse rows: "- **Title (Year)** - description"
+    const parseRows = (content) => {
       const rows = [];
-      const lines = (content||"").split("\n");
-      lines.forEach(line => {
-        // Match "- **Title (Year)** - description" or "- **Title** - description"
-        const m = line.match(/^[-–•]\s*\*\*([^*]+)\*\*\s*[-–]?\s*(.*)/);
-        if (m) rows.push({ raw: line, title: m[1].replace(/\s*\(\d{4}\)\s*$/,"").trim(), fullTitle: m[1].trim(), desc: m[2].trim() });
+      (content||"").split("\n").forEach(line => {
+        const match = line.match(/^[-–•]\s*\*\*([^*]+)\*\*\s*[-–]?\s*(.*)/);
+        if (match) rows.push({
+          raw: line,
+          title: match[1].replace(/\s*\(\d{4}\)\s*$/,"").replace(/\s*[-–]\s*\d{4}$/,"").trim(),
+          fullTitle: match[1].trim(),
+          desc: match[2].trim(),
+          type: guessType(match[1], content),
+        });
       });
       return rows;
     };
 
-    const filmRows = isUser ? [] : parseFilmRows(m.content);
-    const filmTitles = new Set(filmRows.map(r=>r.title));
+    const rows = isUser ? [] : parseRows(m.content);
 
     useEffect(()=>{
-      if (isUser || filmRows.length===0) return;
-      filmRows.forEach(({title})=>{
-        fetchPoster(title,"film").then(url=>{
-          if (url) setPosters(p=>({...p,[title]:url}));
-          else fetchPoster(title,"serie").then(u=>{ if(u) setPosters(p=>({...p,[title]:u})); });
+      if (isUser || rows.length===0) return;
+      rows.forEach(({title, type})=>{
+        fetchPoster(title, type).then(url=>{
+          if (url) { setPosters(p=>({...p,[title]:url})); return; }
+          // fallback: try film if was game and vice versa
+          const fallback = type==="gioco" ? "film" : "gioco";
+          fetchPoster(title, fallback).then(u=>{ if(u) setPosters(p=>({...p,[title]:u})); });
         });
       });
     },[m.content]);
 
-    // Replace film lines with placeholders for rendering
     const renderContent = () => {
-      if (filmRows.length === 0) {
-        return <div style={{padding:"12px 14px",color:isUser?C.bg:C.body,fontFamily:SANS,fontSize:14,lineHeight:1.7,letterSpacing:.1}}
-          dangerouslySetInnerHTML={{__html:mdLight(m.content)}}/>;
-      }
-      // Split content into segments: text blocks and film rows
+      if (rows.length===0) return (
+        <div style={{padding:"12px 16px",color:isUser?C.bg:C.body,fontFamily:SANS,fontSize:14,lineHeight:1.72,letterSpacing:.1}}
+          dangerouslySetInnerHTML={{__html:mdLight(m.content)}}/>
+      );
+      // Split into text + film segments
       const segments = [];
       let remaining = m.content;
-      filmRows.forEach(row => {
+      rows.forEach(row=>{
         const idx = remaining.indexOf(row.raw);
-        if (idx > 0) segments.push({type:"text", content: remaining.substring(0, idx)});
-        segments.push({type:"film", ...row});
-        remaining = remaining.substring(idx + row.raw.length);
+        if (idx>0) segments.push({type:"text",content:remaining.substring(0,idx)});
+        segments.push({type:"item",...row});
+        remaining = remaining.substring(idx+row.raw.length);
       });
-      if (remaining.trim()) segments.push({type:"text", content: remaining});
+      if (remaining.trim()) segments.push({type:"text",content:remaining});
 
-      return segments.map((seg, i) => {
+      return segments.map((seg,i)=>{
         if (seg.type==="text") {
-          const clean = seg.content.trim();
-          if (!clean) return null;
-          return <div key={i} style={{padding:"10px 14px",color:C.body,fontFamily:SANS,fontSize:14,lineHeight:1.7,letterSpacing:.1}}
+          const clean=seg.content.trim(); if(!clean) return null;
+          return <div key={i} style={{padding:"10px 16px",color:C.body,fontFamily:SANS,fontSize:14,lineHeight:1.72,letterSpacing:.1}}
             dangerouslySetInnerHTML={{__html:mdLight(clean)}}/>;
         }
-        // Film row
-        const poster = posters[seg.title];
+        const poster=posters[seg.title];
         return (
-          <div key={i} onClick={()=>onItemClick({title:seg.title,type:"film",genre:""})}
-            style={{display:"flex",alignItems:"stretch",gap:0,cursor:"pointer",borderTop:`1px solid ${C.border}`,transition:"background .12s"}}
-            onMouseEnter={e=>e.currentTarget.style.background=C.accentDim}
+          <div key={i} onClick={()=>onItemClick({title:seg.title,type:seg.type_==="gioco"?"gioco":"film",genre:""})}
+            style={{display:"flex",alignItems:"stretch",gap:0,cursor:"pointer",borderTop:`1px solid rgba(255,255,255,.06)`,transition:"background .15s",minHeight:90}}
+            onMouseEnter={e=>e.currentTarget.style.background="rgba(200,255,0,.06)"}
             onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-            {/* Poster */}
-            <div style={{width:54,flexShrink:0,background:C.border,position:"relative",overflow:"hidden"}}>
+            {/* Text LEFT */}
+            <div style={{flex:1,padding:"12px 14px 12px 16px",minWidth:0,display:"flex",flexDirection:"column",justifyContent:"center"}}>
+              <div style={{fontFamily:SANS,fontSize:14,fontWeight:700,color:C.text,marginBottom:4,letterSpacing:-.1,lineHeight:1.2}}>{seg.fullTitle}</div>
+              {seg.desc&&<div style={{fontFamily:SANS,fontSize:12,color:C.muted,lineHeight:1.65,display:"-webkit-box",WebkitLineClamp:3,WebkitBoxOrient:"vertical",overflow:"hidden"}}
+                dangerouslySetInnerHTML={{__html:mdLight(seg.desc)}}/>}
+              <div style={{fontFamily:MONO,fontSize:9,color:C.accent,marginTop:6,letterSpacing:1}}>TAP →</div>
+            </div>
+            {/* Poster RIGHT */}
+            <div style={{width:70,flexShrink:0,borderRadius:"0 0 0 0",overflow:"hidden",background:C.border,position:"relative"}}>
               {poster
-                ? <img src={poster} alt={seg.title} style={{width:"100%",height:"100%",objectFit:"cover",display:"block",minHeight:78}}/>
-                : <div style={{width:54,height:78,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:MONO,fontSize:11,color:C.dim}}>F</div>
+                ? <img src={poster} alt={seg.title} style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/>
+                : <div style={{width:"100%",height:"100%",minHeight:90,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:MONO,fontSize:14,color:C.dim}}>{seg.type==="gioco"?"G":"F"}</div>
               }
             </div>
-            {/* Text */}
-            <div style={{flex:1,padding:"10px 12px",minWidth:0}}>
-              <div style={{fontFamily:SANS,fontSize:13,fontWeight:700,color:C.text,marginBottom:3,letterSpacing:.1}}>
-                <strong>{seg.fullTitle}</strong>
-              </div>
-              {seg.desc && <div style={{fontFamily:SANS,fontSize:12,color:C.muted,lineHeight:1.6}} dangerouslySetInnerHTML={{__html:mdLight(seg.desc)}}/>}
-            </div>
-            <div style={{display:"flex",alignItems:"center",padding:"0 10px",color:C.accent,fontFamily:MONO,fontSize:10}}>›</div>
           </div>
         );
       });
     };
 
+    // Apple-style bubble radii
+    const br = isUser
+      ? "18px 18px 4px 18px"
+      : "18px 18px 18px 4px";
+
     return (
-      <div style={{alignSelf:isUser?"flex-end":"flex-start",maxWidth:"92%",marginBottom:6,animation:"fadeIn .2s"}}>
-        <div style={{background:isUser?C.accent:C.surface,borderLeft:isUser?"none":`2px solid ${C.border}`,overflow:"hidden"}}>
+      <div style={{alignSelf:isUser?"flex-end":"flex-start",maxWidth:"88%",marginBottom:8,animation:"fadeIn .2s"}}>
+        <div style={{background:isUser?"#1a8cff":C.surface,borderRadius:br,overflow:"hidden",boxShadow:"0 1px 6px rgba(0,0,0,.3)"}}>
           {isUser
-            ? <div style={{padding:"10px 14px",color:C.bg,fontFamily:SANS,fontSize:14,lineHeight:1.7}}
+            ? <div style={{padding:"11px 16px",color:"#fff",fontFamily:SANS,fontSize:14,lineHeight:1.7}}
                 dangerouslySetInnerHTML={{__html:mdLight(m.content)}}/>
             : renderContent()
           }
@@ -1256,11 +1284,17 @@ export default function ReelBot() {
   const ChatPanel = ({maxH}) => (
     <>
       <MoodSelector selected={mood} onSelect={setMood} t={t}/>
-      <div style={{overflowY:"auto",display:"flex",flexDirection:"column",gap:2,paddingBottom:10,flex:1,maxHeight:maxH||undefined,scrollbarWidth:"none"}}>
+      <div style={{overflowY:"auto",display:"flex",flexDirection:"column",gap:4,padding:"8px 4px 10px",flex:1,maxHeight:maxH||undefined,scrollbarWidth:"none"}}>
         {(messages||[]).map((m,i)=>(
           <ChatMessage key={i} m={m} onItemClick={setSelected}/>
         ))}
-        {chatLoading&&<div style={{alignSelf:"flex-start",background:C.surface,padding:"10px 14px",borderLeft:`2px solid ${C.accent}`}}><span style={{fontFamily:MONO,fontSize:10,letterSpacing:2,color:C.accent,animation:"pulse 1s infinite"}}>...</span></div>}
+        {chatLoading&&(
+          <div style={{alignSelf:"flex-start",background:C.surface,borderRadius:"18px 18px 18px 4px",padding:"12px 18px",boxShadow:"0 1px 6px rgba(0,0,0,.3)"}}>
+            <div style={{display:"flex",gap:5,alignItems:"center"}}>
+              {[0,1,2].map(i=><div key={i} style={{width:6,height:6,borderRadius:"50%",background:C.accent,animation:`pulse 1s infinite`,animationDelay:`${i*0.2}s`}}/>)}
+            </div>
+          </div>
+        )}
         <div ref={endRef}/>
       </div>
       <div style={{padding:"10px 0 14px",display:"flex",gap:8,alignItems:"flex-end",borderTop:`1px solid ${C.border}`,flexShrink:0}}>
@@ -1268,10 +1302,10 @@ export default function ReelBot() {
           onChange={e=>setInput(e.target.value)}
           onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send();}}}
           placeholder={t.chat_ph}
-          style={{flex:1,background:"transparent",border:`1px solid ${C.border}`,padding:"10px 12px",color:C.text,fontSize:14,fontFamily:SANS,resize:"none",letterSpacing:.2,lineHeight:1.5}}/>
+          style={{flex:1,background:C.surface,border:`1px solid ${C.border}`,borderRadius:14,padding:"10px 14px",color:C.text,fontSize:14,fontFamily:SANS,resize:"none",letterSpacing:.2,lineHeight:1.5}}/>
         <div style={{display:"flex",flexDirection:"column",gap:6,flexShrink:0,alignSelf:"stretch"}}>
-          <button onClick={send} disabled={chatLoading} style={{flex:1,background:chatLoading?"transparent":C.accent,border:`1px solid ${chatLoading?C.border:C.accent}`,color:chatLoading?C.dim:C.bg,fontFamily:MONO,fontSize:10,letterSpacing:2,padding:"0 16px",cursor:chatLoading?"not-allowed":"pointer",transition:"all .15s",display:"flex",alignItems:"center",justifyContent:"center"}}>GO</button>
-          <button onClick={clearChat} title={t.chat_clear} style={{background:"transparent",border:`1px solid ${C.border}`,color:C.dim,fontFamily:MONO,fontSize:9,padding:"6px 10px",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",letterSpacing:1}}>CLR</button>
+          <button onClick={send} disabled={chatLoading} style={{flex:1,background:chatLoading?"transparent":C.accent,border:`1px solid ${chatLoading?C.border:C.accent}`,borderRadius:10,color:chatLoading?C.dim:C.bg,fontFamily:MONO,fontSize:10,letterSpacing:2,padding:"0 16px",cursor:chatLoading?"not-allowed":"pointer",transition:"all .15s",display:"flex",alignItems:"center",justifyContent:"center"}}>GO</button>
+          <button onClick={clearChat} title={t.chat_clear} style={{background:"transparent",border:`1px solid ${C.border}`,borderRadius:8,color:C.dim,fontFamily:MONO,fontSize:9,padding:"6px 10px",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",letterSpacing:1}}>CLR</button>
         </div>
       </div>
     </>
@@ -1432,11 +1466,17 @@ export default function ReelBot() {
               {desktopRight==="chat" && (
                 <div style={{display:"flex",flexDirection:"column",flex:1,minHeight:0}}>
                   <MoodSelector selected={mood} onSelect={setMood} t={t}/>
-                  <div style={{overflowY:"auto",display:"flex",flexDirection:"column",gap:2,flex:1,paddingBottom:10,scrollbarWidth:"none"}}>
+                  <div style={{overflowY:"auto",display:"flex",flexDirection:"column",gap:4,flex:1,padding:"8px 4px 10px",scrollbarWidth:"none"}}>
                     {(messages||[]).map((m,i)=>(
                       <ChatMessage key={i} m={m} onItemClick={setSelected}/>
                     ))}
-                    {chatLoading&&<div style={{alignSelf:"flex-start",background:C.surface,padding:"10px 14px",borderLeft:`2px solid ${C.accent}`}}><span style={{fontFamily:MONO,fontSize:10,letterSpacing:2,color:C.accent,animation:"pulse 1s infinite"}}>...</span></div>}
+                    {chatLoading&&(
+                      <div style={{alignSelf:"flex-start",background:C.surface,borderRadius:"18px 18px 18px 4px",padding:"12px 18px",boxShadow:"0 1px 6px rgba(0,0,0,.3)"}}>
+                        <div style={{display:"flex",gap:5,alignItems:"center"}}>
+                          {[0,1,2].map(i=><div key={i} style={{width:6,height:6,borderRadius:"50%",background:C.accent,animation:"pulse 1s infinite",animationDelay:`${i*0.2}s`}}/>)}
+                        </div>
+                      </div>
+                    )}
                     <div ref={endRef}/>
                   </div>
                   <div style={{padding:"12px 0 20px",display:"flex",gap:8,alignItems:"flex-end",borderTop:`1px solid ${C.border}`,flexShrink:0}}>
@@ -1444,10 +1484,10 @@ export default function ReelBot() {
                       onChange={e=>setInput(e.target.value)}
                       onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send();}}}
                       placeholder={t.chat_ph}
-                      style={{flex:1,background:"transparent",border:`1px solid ${C.border}`,padding:"10px 14px",color:C.text,fontSize:14,fontFamily:SANS,resize:"none",letterSpacing:.2,lineHeight:1.6}}/>
+                      style={{flex:1,background:C.surface,border:`1px solid ${C.border}`,borderRadius:14,padding:"10px 14px",color:C.text,fontSize:14,fontFamily:SANS,resize:"none",letterSpacing:.2,lineHeight:1.6}}/>
                     <div style={{display:"flex",flexDirection:"column",gap:6,flexShrink:0,alignSelf:"stretch"}}>
-                      <button onClick={send} disabled={chatLoading} style={{flex:1,background:chatLoading?"transparent":C.accent,border:`1px solid ${chatLoading?C.border:C.accent}`,color:chatLoading?C.dim:C.bg,fontFamily:MONO,fontSize:10,letterSpacing:2,padding:"0 20px",cursor:chatLoading?"not-allowed":"pointer",transition:"all .15s",display:"flex",alignItems:"center",justifyContent:"center"}}>GO</button>
-                      <button onClick={clearChat} style={{background:"transparent",border:`1px solid ${C.border}`,color:C.dim,fontFamily:MONO,fontSize:9,padding:"7px 10px",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",letterSpacing:1}}>CLR</button>
+                      <button onClick={send} disabled={chatLoading} style={{flex:1,background:chatLoading?"transparent":C.accent,border:`1px solid ${chatLoading?C.border:C.accent}`,borderRadius:10,color:chatLoading?C.dim:C.bg,fontFamily:MONO,fontSize:10,letterSpacing:2,padding:"0 20px",cursor:chatLoading?"not-allowed":"pointer",transition:"all .15s",display:"flex",alignItems:"center",justifyContent:"center"}}>GO</button>
+                      <button onClick={clearChat} style={{background:"transparent",border:`1px solid ${C.border}`,borderRadius:8,color:C.dim,fontFamily:MONO,fontSize:9,padding:"7px 10px",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",letterSpacing:1}}>CLR</button>
                     </div>
                   </div>
                 </div>
