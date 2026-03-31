@@ -970,37 +970,148 @@ const MissionMode = ({lang,onStatus,savedMissions,onSaveMission,onDeleteMission}
 };
 
 /* ─── FILM SCAN ──────────────────────────────────────── */
-const FilmScan = ({lang,onStatus}) => {
+const FilmScan = ({lang,onStatus,onAddItem}) => {
   const t = TR[lang]||TR.it;
-  const [result,setResult]=useState(null);
-  const [loading,setLoading]=useState(false);
-  const [preview,setPreview]=useState(null);
-  const [err,setErr]=useState(false);
-  const fileRef=useRef();
+  const isRu = lang==="ru";
+  const [result,setResult] = useState(null);
+  const [detected,setDetected] = useState(null); // {title, type}
+  const [loading,setLoading]   = useState(false);
+  const [preview,setPreview]   = useState(null);
+  const [err,setErr]           = useState(false);
+  const [added,setAdded]       = useState(false);
+  const fileRef = useRef();
+
+  const SCAN_DEEP_PROMPT = (lang) => {
+    const isRu = lang==="ru";
+    return isRu
+      ? `Ты эксперт по кино и видеоиграм. Проанализируй этот скриншот МАКСИМАЛЬНО ДЕТАЛЬНО. Используй web_search для поиска информации.
+
+Отвечай строго в этом формате:
+
+**ФИЛЬМ/СЕРИАЛ/ИГРА:** [Точное название]
+**ГОД:** [год]
+**ЖАНР:** [жанр]
+**РЕЖИССЁР/РАЗРАБОТЧИК:** [имя]
+
+**ПЕРСОНАЖИ И АКТЁРЫ:**
+[Перечисли всех видимых персонажей и актёров]
+
+**СЦЕНА:**
+[Подробное описание происходящего]
+
+**ИНТЕРЕСНЫЙ ФАКТ:**
+[Неочевидная деталь об этой сцене или фильме]
+
+**ЗА КАДРОМ:**
+[Реальная история со съёмок или разработки]
+
+Если не можешь точно определить — опиши что видишь и предложи варианты. Без эмодзи.`
+      : `Sei esperto di cinema e videogiochi. Analizza questo screenshot in modo DETTAGLIATO. Usa web_search per cercare informazioni accurate.
+
+Rispondi esattamente in questo formato:
+
+**FILM/SERIE/GIOCO:** [Titolo esatto]
+**ANNO:** [anno]
+**GENERE:** [genere]
+**REGISTA/SVILUPPATORE:** [nome]
+
+**PERSONAGGI E ATTORI:**
+[Elenca tutti i personaggi visibili e chi li interpreta]
+
+**SCENA:**
+[Descrizione dettagliata di cosa sta succedendo]
+
+**FATTO INTERESSANTE:**
+[Dettaglio non ovvio su questa scena o film]
+
+**DIETRO LE QUINTE:**
+[Storia reale dal set o dalla produzione]
+
+Se non riesci a identificare con certezza — descrivi quello che vedi e proponi ipotesi. Niente emoji.`;
+  };
+
+  const extractTitle = (text) => {
+    // Try to extract title from response
+    const match = (text||"").match(/\*\*(?:FILM|SERIE|GIOCO|ФИЛЬМ|СЕРИАЛ|ИГРА)[^:]*:\*\*\s*([^\n*]+)/i);
+    if (match) {
+      const raw = match[1].trim();
+      if (raw && raw.length > 1 && raw.toLowerCase() !== "sconosciuto" && raw !== "?") {
+        const isGame = /игра|gioco/i.test(text);
+        return { title: raw.replace(/\s*\(\d{4}\).*$/,"").trim(), type: isGame?"gioco":"film" };
+      }
+    }
+    return null;
+  };
 
   const handle = async (file) => {
     if (!file||!file.type.startsWith("image/")) return;
-    setPreview(URL.createObjectURL(file)); setResult(null); setErr(false); setLoading(true);
-    try { const b64=await fileToB64(file); const raw=await callClaude({messages:[{role:"user",content:[{type:"image",source:{type:"base64",media_type:getMime(file),data:b64}},{type:"text",text:SCAN_PROMPT(lang)}]}],withSearch:true,maxTokens:1100,onStatus}); setResult(raw); }
-    catch { setErr(true); }
+    setPreview(URL.createObjectURL(file));
+    setResult(null); setErr(false); setLoading(true); setDetected(null); setAdded(false);
+    try {
+      const b64 = await fileToB64(file);
+      const raw = await callClaude({
+        messages:[{role:"user",content:[
+          {type:"image",source:{type:"base64",media_type:getMime(file),data:b64}},
+          {type:"text",text:SCAN_DEEP_PROMPT(lang)}
+        ]}],
+        withSearch:true, maxTokens:1200, onStatus
+      });
+      setResult(raw);
+      const det = extractTitle(raw);
+      if (det) setDetected(det);
+    } catch { setErr(true); }
     setLoading(false);
   };
+
   const onDrop = useCallback(e=>{ e.preventDefault(); const f=e.dataTransfer.files[0]; if(f) handle(f); },[lang]);
 
   return (
     <div style={{display:"flex",flexDirection:"column",height:"100%"}}>
-      <div style={{fontFamily:MONO,fontSize:11,letterSpacing:3,color:C.accent,marginBottom:8}}>{t.scan_title}</div>
-      <p style={{fontFamily:SANS,fontSize:13,color:C.muted,marginBottom:16,lineHeight:1.7}}>{t.scan_desc}</p>
+      <div style={{fontFamily:MONO,fontSize:11,letterSpacing:3,color:C.accent,marginBottom:6}}>{t.scan_title}</div>
+      <p style={{fontFamily:SANS,fontSize:12,color:C.muted,marginBottom:14,lineHeight:1.6}}>{t.scan_desc}</p>
+
+      {/* Drop zone */}
       <div onDrop={onDrop} onDragOver={e=>e.preventDefault()} onClick={()=>!loading&&fileRef.current.click()}
-        style={{border:`1px solid ${loading?C.accent:preview?C.border:C.borderHi}`,position:"relative",minHeight:150,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",cursor:loading?"wait":"pointer",marginBottom:16,overflow:"hidden",transition:"border-color .2s",flexShrink:0}}>
+        style={{border:`1px dashed ${loading?C.accent:preview?C.border:C.borderHi}`,borderRadius:12,position:"relative",minHeight:140,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",cursor:loading?"wait":"pointer",marginBottom:14,overflow:"hidden",transition:"border-color .2s",flexShrink:0}}>
         <input ref={fileRef} type="file" accept="image/*" style={{display:"none"}} onChange={e=>e.target.files[0]&&handle(e.target.files[0])}/>
-        {preview&&<img src={preview} alt="" style={{width:"100%",display:"block",maxHeight:220,objectFit:"cover",filter:loading?"blur(6px) brightness(.2)":"none",transition:"filter .3s"}}/>}
-        {loading&&<div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:8}}><div style={{fontFamily:MONO,fontSize:10,letterSpacing:2,color:C.accent,animation:"pulse 1s infinite"}}>{t.scan_loading}</div><div style={{fontFamily:MONO,fontSize:9,color:C.dim,letterSpacing:1}}>{t.scan_searching}</div></div>}
-        {!preview&&!loading&&<><div style={{fontFamily:MONO,fontSize:10,letterSpacing:2,color:C.muted}}>+ {t.scan_drop}</div><div style={{fontFamily:MONO,fontSize:9,color:C.dim,marginTop:8,letterSpacing:1}}>{t.scan_hint}</div></>}
-        {preview&&!loading&&<div style={{position:"absolute",bottom:0,right:0}} onClick={e=>{e.stopPropagation();fileRef.current.click();}}><div style={{fontFamily:MONO,fontSize:9,letterSpacing:1.5,padding:"6px 12px",background:C.bg,color:C.accent,border:`1px solid ${C.accent}`,cursor:"pointer"}}>{t.scan_new}</div></div>}
+        {preview&&<img src={preview} alt="" style={{width:"100%",display:"block",maxHeight:200,objectFit:"cover",filter:loading?"blur(6px) brightness(.15)":"none",transition:"filter .3s"}}/>}
+        {loading&&<div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:8}}>
+          <div style={{fontFamily:MONO,fontSize:10,letterSpacing:2,color:C.accent,animation:"pulse 1s infinite"}}>{t.scan_loading}</div>
+          <div style={{fontFamily:MONO,fontSize:9,color:C.dim,letterSpacing:1}}>{t.scan_searching}</div>
+        </div>}
+        {!preview&&!loading&&<>
+          <div style={{fontFamily:MONO,fontSize:10,letterSpacing:2,color:C.muted}}>+ {t.scan_drop}</div>
+          <div style={{fontFamily:MONO,fontSize:9,color:C.dim,marginTop:6,letterSpacing:1}}>{t.scan_hint}</div>
+        </>}
+        {preview&&!loading&&<div style={{position:"absolute",top:8,right:8}} onClick={e=>{e.stopPropagation();fileRef.current.click();}}>
+          <div style={{fontFamily:MONO,fontSize:8,letterSpacing:1.5,padding:"4px 10px",background:C.bg+"ee",color:C.accent,border:`1px solid ${C.accent}`,borderRadius:20,cursor:"pointer"}}>{t.scan_new}</div>
+        </div>}
       </div>
-      {err&&<div style={{textAlign:"center",padding:"20px 0"}}><div style={{fontFamily:MONO,fontSize:10,color:C.muted,marginBottom:12,letterSpacing:1}}>{t.scan_err}</div><button onClick={()=>fileRef.current.click()} style={{fontFamily:MONO,fontSize:10,letterSpacing:2,padding:"8px 20px",border:`1px solid ${C.border}`,background:"transparent",color:C.text,cursor:"pointer"}}>{t.retry}</button></div>}
-      {result&&!loading&&<div style={{overflowY:"auto",scrollbarWidth:"none",paddingBottom:20,animation:"fadeIn .3s"}}><div style={{fontFamily:MONO,fontSize:9,letterSpacing:2,color:C.accent,marginBottom:12}}>{t.scan_label}</div><div style={{fontFamily:SANS,fontSize:13,lineHeight:1.9,color:C.body}} dangerouslySetInnerHTML={{__html:mdLight(result)}}/></div>}
+
+      {err&&<div style={{textAlign:"center",padding:"20px 0"}}>
+        <div style={{fontFamily:MONO,fontSize:10,color:C.muted,marginBottom:12,letterSpacing:1}}>{t.scan_err}</div>
+        <button onClick={()=>fileRef.current.click()} style={{fontFamily:MONO,fontSize:10,letterSpacing:2,padding:"8px 20px",border:`1px solid ${C.border}`,borderRadius:20,background:"transparent",color:C.text,cursor:"pointer"}}>{t.retry}</button>
+      </div>}
+
+      {result&&!loading&&<div style={{overflowY:"auto",scrollbarWidth:"none",paddingBottom:20,animation:"fadeIn .3s",flex:1}}>
+        <div style={{fontFamily:MONO,fontSize:9,letterSpacing:2,color:C.accent,marginBottom:10}}>{t.scan_label}</div>
+        <div style={{fontFamily:SANS,fontSize:13,lineHeight:1.9,color:C.body}} dangerouslySetInnerHTML={{__html:mdLight(result)}}/>
+
+        {/* Add to library/wishlist if title detected */}
+        {detected&&onAddItem&&(
+          <div style={{display:"flex",gap:8,marginTop:16,flexWrap:"wrap"}}>
+            <button onClick={()=>{ onAddItem({...detected,dest:"library"}); setAdded(true); }}
+              disabled={added}
+              style={{fontFamily:MONO,fontSize:8,letterSpacing:2,padding:"6px 14px",borderRadius:20,border:`1px solid ${added?C.pistachio:C.accent}`,background:added?C.pistaDim:C.accentDim,color:added?C.pistachio:C.accent,cursor:added?"default":"pointer",transition:"all .2s"}}>
+              {added?(isRu?"✓ ДОБАВЛЕНО":"✓ AGGIUNTO"):(isRu?`+ БИБЛИОТЕКА: ${detected.title}`:`+ LIBRERIA: ${detected.title}`)}
+            </button>
+            {!added&&<button onClick={()=>{ onAddItem({...detected,dest:"wishlist"}); setAdded(true); }}
+              style={{fontFamily:MONO,fontSize:8,letterSpacing:2,padding:"6px 14px",borderRadius:20,border:`1px solid ${C.border}`,background:"transparent",color:C.muted,cursor:"pointer",transition:"all .2s"}}>
+              {isRu?`+ СПИСОК: ${detected.title}`:`+ LISTA: ${detected.title}`}
+            </button>}
+          </div>
+        )}
+      </div>}
     </div>
   );
 };
@@ -1349,11 +1460,13 @@ export default function ReelBot() {
 
   /* ── CHAT ── */
   const send = async () => {
-    if (!input.trim()||chatLoading) return;
-    const msg={role:"user",content:input};
+    const val = (inputRef.current?.value||"").trim();
+    if (!val||chatLoading) return;
+    const msg={role:"user",content:val};
     const next=[...(messages||[]),msg];
     setChats(prev=>({...prev,[active]:next}));
-    setInput(""); setChatLoading(true);
+    if(inputRef.current) inputRef.current.value="";
+    setChatLoading(true);
     try {
       const raw = await callClaude({
         system:CHAT_SYS(lang,profiles,mood,active,t.moods),
@@ -1371,7 +1484,7 @@ export default function ReelBot() {
       stSet(chatKey(active), final.slice(-MAX_CHAT_STORED));
     }
     setChatLoading(false);
-    setTimeout(()=>inputRef.current?.focus(),100);
+    if(inputRef.current){ inputRef.current.value=""; inputRef.current.focus(); }
   };
 
   const clearChat = () => {
@@ -1429,8 +1542,8 @@ export default function ReelBot() {
         <div ref={endRef}/>
       </div>
       <div style={{padding:"10px 0 14px",display:"flex",gap:8,alignItems:"flex-end",borderTop:`1px solid ${C.border}`,flexShrink:0,background:C.bg}}>
-        <textarea ref={inputRef} rows={isDesktop?3:2} value={input}
-          onChange={e=>setInput(e.target.value)}
+        <textarea ref={inputRef} rows={isDesktop?3:2}
+          defaultValue=""
           onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send();}}}
           placeholder={t.chat_ph}
           style={{flex:1,background:C.surface,border:`1px solid ${C.border}`,borderRadius:14,padding:"10px 14px",color:C.text,fontSize:14,fontFamily:SANS,resize:"none",letterSpacing:.2,lineHeight:1.5,outline:"none"}}/>
@@ -1487,7 +1600,7 @@ export default function ReelBot() {
       </div>
       <div style={{flex:1,overflowY:"auto",scrollbarWidth:"none"}}>
         {visionMode==="mission"&&<MissionMode lang={lang} onStatus={setApiStatus} savedMissions={missions} onSaveMission={saveMission} onDeleteMission={deleteMission}/>}
-        {visionMode==="scan"&&<FilmScan lang={lang} onStatus={setApiStatus}/>}
+        {visionMode==="scan"&&<FilmScan lang={lang} onStatus={setApiStatus} onAddItem={(it)=>{ applyAction({op:"add",dest:it.dest||"library",profile:active,title:it.title,type:it.type||"film",genre:it.genre||"",status:"finito",hours:2}); }}/>}
       </div>
     </div>
   );
@@ -1634,7 +1747,7 @@ export default function ReelBot() {
               {desktopRight==="vision" && (
                 <div style={{flex:1,overflowY:"auto",scrollbarWidth:"none"}}>
                   {visionMode==="mission"&&<MissionMode lang={lang} onStatus={setApiStatus} savedMissions={missions} onSaveMission={saveMission} onDeleteMission={deleteMission}/>}
-                  {visionMode==="scan"&&<FilmScan lang={lang} onStatus={setApiStatus}/>}
+                  {visionMode==="scan"&&<FilmScan lang={lang} onStatus={setApiStatus} onAddItem={(it)=>{ applyAction({op:"add",dest:it.dest||"library",profile:active,title:it.title,type:it.type||"film",genre:it.genre||"",status:"finito",hours:2}); }}/>}
                 </div>
               )}
               {desktopRight==="stats"   && <div style={{overflowY:"auto",flex:1,scrollbarWidth:"none"}}><StatsView library={lib} lang={lang}/></div>}
@@ -1650,7 +1763,7 @@ export default function ReelBot() {
   // MOBILE LAYOUT  (< 900px)
   // ════════════════════════════════════════
   return (
-    <div style={{fontFamily:SANS,background:C.bg,height:"100dvh",color:C.text,display:"flex",flexDirection:"column",maxWidth:480,margin:"0 auto",overflow:"hidden"}}>
+    <div style={{fontFamily:SANS,background:C.bg,color:C.text,display:"flex",flexDirection:"column",height:"100dvh",maxWidth:480,margin:"0 auto",overflow:"hidden",position:"fixed",inset:0,maxWidth:480,left:"50%",transform:"translateX(-50%)",right:"auto"}}>
       <style>{`
         @keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
         @keyframes scaleIn{from{opacity:0;transform:scale(.95)}to{opacity:1;transform:scale(1)}}
@@ -1666,23 +1779,22 @@ export default function ReelBot() {
       <Notif msg={notif}/>
       {selected&&<DetailModal item={selected} onClose={()=>setSelected(null)} lang={lang} onStatus={setApiStatus} onAddToLibrary={(it)=>{ applyAction({op:"add",dest:"library",profile:active,title:it.title,type:it.type||"film",genre:it.genre||"",status:"finito",hours:2}); }} onAddToWishlist={(it)=>{ applyAction({op:"add",dest:"wishlist",profile:active,title:it.title,type:it.type||"film",genre:it.genre||""}); }}/>}
 
-      {/* STICKY HEADER */}
-      <div style={{flexShrink:0}}>
+      {/* STICKY TOP: header + tabs */}
+      <div style={{flexShrink:0,background:C.bg,zIndex:10}}>
         <Header/>
-        {/* STICKY TABS */}
-        <div style={{display:"flex",borderBottom:`1px solid ${C.border}`,overflowX:"auto",scrollbarWidth:"none",background:C.bg}}>
+        <div style={{display:"flex",borderBottom:`1px solid ${C.border}`,overflowX:"auto",scrollbarWidth:"none"}}>
           {TABS.map(tb=>tabBtn(tb.id,tb.label))}
         </div>
       </div>
 
-      {/* SCROLLABLE CONTENT — fills remaining height */}
-      <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden",padding: tab==="chat" ? "14px 12px 0" : "14px 16px 0"}}>
-        {tab==="chat"&&<ChatPanel/>}
-        {tab==="libreria"&&<div style={{overflowY:"auto",flex:1,scrollbarWidth:"none"}}><LibPanel/></div>}
-        {tab==="wishlist"&&<div style={{overflowY:"auto",flex:1,scrollbarWidth:"none"}}><WishPanel/></div>}
-        {tab==="vision"&&<div style={{overflowY:"auto",flex:1,scrollbarWidth:"none"}}><VisionPanel/></div>}
-        {tab==="stats"&&<div style={{overflowY:"auto",flex:1,scrollbarWidth:"none"}}><StatsView library={lib} lang={lang}/></div>}
-        {tab==="profile"&&<div style={{overflowY:"auto",flex:1,scrollbarWidth:"none"}}><ProfileEditor profiles={profiles} active={active} onSave={savePrefs} t={t}/></div>}
+      {/* CONTENT — fills remaining space, each panel handles its own scroll */}
+      <div style={{flex:1,overflow:"hidden",display:"flex",flexDirection:"column",padding:"12px 12px 0"}}>
+        {tab==="chat"    && <ChatPanel/>}
+        {tab==="libreria"&& <div style={{overflowY:"auto",flex:1,scrollbarWidth:"none"}}><LibPanel/></div>}
+        {tab==="wishlist"&& <div style={{overflowY:"auto",flex:1,scrollbarWidth:"none"}}><WishPanel/></div>}
+        {tab==="vision"  && <div style={{overflowY:"auto",flex:1,scrollbarWidth:"none"}}><VisionPanel/></div>}
+        {tab==="stats"   && <div style={{overflowY:"auto",flex:1,scrollbarWidth:"none"}}><StatsView library={lib} lang={lang}/></div>}
+        {tab==="profile" && <div style={{overflowY:"auto",flex:1,scrollbarWidth:"none"}}><ProfileEditor profiles={profiles} active={active} onSave={savePrefs} t={t}/></div>}
       </div>
     </div>
   );
