@@ -1,15 +1,28 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 
 /* ─── DESIGN TOKENS ─────────────────────────────────── */
 const C = {
-  bg:"#0c0c0c", surface:"#141414", border:"#222222", borderHi:"#333333",
-  dim:"#444444", muted:"#666666", body:"#b0b0b0", text:"#e8e6e1",
-  accent:"#c8ff00", accentDim:"#c8ff0022",
-  red:"#ff3b30", blue:"#4a9eff", green:"#00c896",
+  bg:       "#0f0e0c",       // nero caldo
+  surface:  "#1a1814",       // superficie calda
+  surface2: "#242018",       // superficie secondaria
+  border:   "#2e2a22",       // bordo caldo
+  borderHi: "#3d3830",       // bordo highlight
+  dim:      "#6b6355",       // testo tenue
+  muted:    "#9c907e",       // testo muted
+  body:     "#d4cbbf",       // testo corpo
+  text:     "#f0ead8",       // testo principale crema
+  accent:   "#c9a84c",       // oro
+  accentDim:"#c9a84c22",     // oro trasparente
+  accentSoft:"#c9a84c44",
+  pistachio:"#8fbc6e",       // pistacchio
+  pistaDim: "#8fbc6e22",
+  red:      "#e05555",
+  blue:     "#5b9bd5",
+  green:    "#8fbc6e",       // stesso pistacchio per coerenza
 };
-const FONT_URL = "https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;700&family=Golos+Text:wght@400;500;700;900&display=swap";
-const MONO = "'IBM Plex Mono', monospace";
-const SANS = "'Golos Text', sans-serif";
+const FONT_URL = "https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap";
+const MONO = "'DM Mono', monospace";
+const SANS = "'DM Sans', sans-serif";
 
 /* ─── STORAGE KEYS ───────────────────────────────────── */
 const SK = {
@@ -340,11 +353,15 @@ async function fileToB64(file) {
   return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result.split(",")[1]); r.onerror=rej; r.readAsDataURL(file); });
 }
 function getMime(f){ return f.type==="image/png"?"image/png":f.type==="image/webp"?"image/webp":"image/jpeg"; }
+function stripEmoji(text) {
+  return (text||"").replace(/[\u{1F000}-\u{1FFFF}]|[\u{2600}-\u{27FF}]|[\u{FE00}-\u{FEFF}]|[\u{1F900}-\u{1F9FF}]|[\u{1FA00}-\u{1FA9F}]/gu,"").replace(/\s+/g," ").trim();
+}
 function mdLight(text) {
-  return (text||"")
+  return stripEmoji(text||"")
     .replace(/\*\*(.*?)\*\*/g,"<strong>$1</strong>")
     .replace(/\*(.*?)\*/g,"<em>$1</em>")
     .replace(/^#{1,3}\s+(.+)$/gm,`<span style="font-family:${MONO};font-size:11px;color:${C.accent};letter-spacing:2px;text-transform:uppercase">$1</span>`)
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g,`<a href="$2" target="_blank" rel="noopener" style="color:${C.accent};text-decoration:underline;text-decoration-color:${C.accentSoft}">$1</a>`)
     .replace(/\n/g,"<br/>");
 }
 
@@ -361,16 +378,18 @@ const CHAT_SYS = (lang, profiles, mood, active, moods) => {
   const recentOther = otherProf.library.filter(i=>i.addedAt).sort((a,b)=>new Date(b.addedAt)-new Date(a.addedAt)).slice(0,5).map(i=>`- ${i.title}${i.rating?" (★"+i.rating+")":""}`).join("\n");
 
   const persona = isRu
-    ? `Ты REELBOT — дружелюбный и внимательный помощник по кино, сериалам и играм. Говоришь с КИРОЙ, её партнёр АДАМ.
-ВСЕГДА отвечай по-русски. Тон: тёплый, уважительный, информативный. Давай развёрнутые ответы с конкретными деталями.
-Когда даёшь совет — объясняй почему именно этот выбор подходит. Структурируй ответы чётко.
-ПОИСК: Для новостей, дат выхода, трейлеров, актёров — используй web_search. Включай реальные ссылки.
-Упоминай что смотрел/играл Адам когда это помогает с советом. Не предлагай уже просмотренное.`
-    : `Sei REELBOT — assistente cordiale e attento per film, serie e videogiochi. Parli con ADAM, la sua partner è KIRA.
-Parla SEMPRE in italiano. Tono: caldo, rispettoso, informativo. Dai risposte dettagliate e complete.
-Quando consigli qualcosa — spiega sempre il perché, struttura le risposte in modo chiaro.
-RICERCA: Per notizie, date uscita, trailer, cast — usa web_search. Includi link reali nella risposta.
-Menziona cosa ha visto/giocato Kira quando aiuta con il consiglio. Non riproporre titoli già visti.`;
+    ? `Ты REELBOT — дружелюбный помощник по кино, сериалам и играм. Говоришь с КИРОЙ, её партнёр АДАМ.
+ВСЕГДА отвечай по-русски. Тон: тёплый, уважительный, информативный.
+ВАЖНО: НЕ используй эмодзи вообще. Никаких 📽️ 🎮 ⭐ 🔥 и т.д.
+Когда перечисляешь фильмы/игры — ВСЕГДА формат: "- **Название (Год)** - описание"
+ПОИСК: Для новостей, дат выхода, трейлеров, актёров, форумов Reddit — используй web_search. Включай реальные ссылки и цитаты из обсуждений.
+Упоминай что смотрел/играл Адам когда это помогает. Не предлагай уже просмотренное.`
+    : `Sei REELBOT — assistente cordiale per film, serie e videogiochi. Parli con ADAM, la sua partner è KIRA.
+Parla SEMPRE in italiano. Tono: caldo, rispettoso, informativo.
+IMPORTANTE: NON usare emoji. Nessuna 📽️ 🎮 ⭐ 🔥 ecc.
+Quando elenchi film/giochi — SEMPRE formato: "- **Titolo (Anno)** - descrizione"
+RICERCA: Per notizie, date uscita, trailer, cast, forum Reddit, blog — usa web_search. Includi link reali e citazioni dalle discussioni.
+Menziona cosa ha visto/giocato Kira quando aiuta. Non riproporre titoli già visti.`;
 
   const tag = isRu
     ? `Библиотека: [REEL:{"op":"add","dest":"library","profile":"tu|lei|entrambi","title":"НАЗВАНИЕ","type":"film|serie|gioco","status":"finito|in corso|abbandonato","genre":"horror|azione|commedia|thriller|fantasy|sci-fi|romantico|animazione|documentario|altro","rating":null,"hours":2}]
@@ -397,11 +416,11 @@ const DETAIL_PROMPT = (title, type, lang) => {
   const isRu = lang==="ru";
   const isGame = type==="gioco";
   if (isRu) {
-    return `Эксперт по ${isGame?"играм":"кино"}. Информация о "${title}". ТОЛЬКО JSON, текст на русском, коротко:
-{"anno":"год","regista":"режиссёр","cast":"актёры (макс 4)","genere":"жанр","durata":"длительность","rating_critica":"IMDb X.X","trama":"сюжет 80-100 слов","origine":"история создания 50-60 слов","teorie":[{"titolo":"теория","descrizione":"40-50 слов"},{"titolo":"...","descrizione":"..."}],"curiosita":["факт 30-40 слов","...","..."],"da_notare":["деталь 1","деталь 2"],"gameplay_tips":${isGame?'["совет 1","совет 2","совет 3"]':"null"},"achievements":${isGame?'[{"nome":"название","come":"как","difficolta":"facile|medio|difficile"}]':"null"},"simili":["тайтл 1","тайтл 2","тайтл 3"],"youtube_query":"${title} trailer"}`;
+    return `Эксперт по ${isGame?"играм":"кино"}. Информация о "${title}". ТОЛЬКО JSON, текст на русском:
+{"anno":"год","regista":"режиссёр/разработчик","cast":[{"nome":"Имя Актёра","personaggio":"Персонаж","tmdb_name":"English Name for TMDB search"}],"genere":"жанр","durata":"длительность","rating_critica":"IMDb X.X / Metacritic XX","trama":"сюжет 120-150 слов","origine":"история создания 60-80 слов","teorie":[{"titolo":"теория","descrizione":"50-70 слов"},{"titolo":"...","descrizione":"..."},{"titolo":"...","descrizione":"..."}],"curiosita":["факт 40-50 слов","...","...","..."],"da_notare":["деталь 1","деталь 2","деталь 3"],"gameplay_tips":${isGame?'["совет 1","совет 2","совет 3"]':"null"},"achievements":${isGame?'[{"nome":"название","come":"как получить","difficolta":"facile|medio|difficile"}]':"null"},"simili":["тайтл 1","тайтл 2","тайтл 3"],"youtube_query":"${title} trailer официальный"}`;
   }
-  return `Esperto di ${isGame?"videogiochi":"cinema"}. Info su "${title}". SOLO JSON, italiano, breve:
-{"anno":"anno","regista":"regista","cast":"attori (max 4)","genere":"genere","durata":"durata","rating_critica":"IMDb X.X","trama":"trama 80-100 parole","origine":"origini produzione 50-60 parole","teorie":[{"titolo":"teoria","descrizione":"40-50 parole"},{"titolo":"...","descrizione":"..."}],"curiosita":["curiosita 30-40 parole","...","..."],"da_notare":["dettaglio 1","dettaglio 2"],"gameplay_tips":${isGame?'["consiglio 1","consiglio 2","consiglio 3"]':"null"},"achievements":${isGame?'[{"nome":"nome","come":"come","difficolta":"facile|medio|difficile"}]':"null"},"simili":["titolo 1","titolo 2","titolo 3"],"youtube_query":"${title} trailer ufficiale italiano"}`;
+  return `Esperto di ${isGame?"videogiochi":"cinema"}. Info dettagliate su "${title}". SOLO JSON, italiano:
+{"anno":"anno","regista":"regista/sviluppatore","cast":[{"nome":"Nome Attore","personaggio":"Personaggio","tmdb_name":"English Name for TMDB search"}],"genere":"genere","durata":"durata","rating_critica":"IMDb X.X / Metacritic XX","trama":"trama 120-150 parole","origine":"origini produzione 60-80 parole","teorie":[{"titolo":"teoria","descrizione":"50-70 parole"},{"titolo":"...","descrizione":"..."},{"titolo":"...","descrizione":"..."}],"curiosita":["curiosita 40-50 parole","...","...","..."],"da_notare":["dettaglio 1","dettaglio 2","dettaglio 3"],"gameplay_tips":${isGame?'["consiglio 1","consiglio 2","consiglio 3"]':"null"},"achievements":${isGame?'[{"nome":"nome","come":"come ottenerlo","difficolta":"facile|medio|difficile"}]':"null"},"simili":["titolo 1","titolo 2","titolo 3"],"youtube_query":"${title} trailer ufficiale italiano"}`;
 };
 
 const MISSION_PROMPT = (game, mission, step, history, lang) => {
@@ -413,10 +432,57 @@ const MISSION_PROMPT = (game, mission, step, history, lang) => {
 };
 
 const SCAN_PROMPT = (lang) => lang==="ru"
-  ?`REELBOT esperto di cinema. Screenshot ricevuto. Rispondi in RUSSO:\n\n1. ФИЛЬМ/СЕРИАЛ: название, год, режиссёр\n2. ПЕРСОНАЖИ: кто на экране и кто их играет\n3. СЦЕНА: что происходит\n4. АКТЁРЫ: краткое досье каждого\n5. ФАКТ: неочевидная деталь\n6. ЗА КАДРОМ: история со съёмок\n\nКоротко, точно, с иронией.`
-  :`REELBOT esperto di cinema. Screenshot ricevuto. Rispondi in ITALIANO:\n\n1. FILM/SERIE: titolo, anno, regista\n2. PERSONAGGI: chi e in scena e chi li interpreta\n3. SCENA: cosa sta succedendo\n4. ATTORI: scheda rapida di ognuno\n5. FATTO: dettaglio non ovvio\n6. DIETRO LE QUINTE: storia dal set\n\nBreve, preciso, ironico.`;
+  ? `Ты эксперт по кино. Получен скриншот. Отвечай ИСКЛЮЧИТЕЛЬНО по-русски:\n\n1. ФИЛЬМ/СЕРИАЛ: название, год, режиссёр\n2. ПЕРСОНАЖИ: кто на экране и кто их играет\n3. СЦЕНА: что происходит (без спойлеров)\n4. АКТЁРЫ: краткое досье каждого\n5. ФАКТ: неочевидная деталь о сцене\n6. ЗА КАДРОМ: реальная история со съёмок\n\nЕсли не можешь определить — опиши что видишь. Без эмодзи.`
+  : `Sei esperto di cinema. Screenshot ricevuto. Rispondi in ITALIANO:\n\n1. FILM/SERIE: titolo, anno, regista\n2. PERSONAGGI: chi e in scena e chi li interpreta\n3. SCENA: cosa sta succedendo (no spoiler)\n4. ATTORI: scheda rapida di ognuno\n5. FATTO: dettaglio non ovvio sulla scena\n6. DIETRO LE QUINTE: storia reale dal set\n\nSe non riconosci — descrivi quello che vedi. Niente emoji.`;
 
-/* ─── API STATUS DOT ─────────────────────────────────── */
+/* ─── LIGHTBOX ───────────────────────────────────────── */
+const Lightbox = ({src, alt, onClose}) => {
+  useEffect(()=>{
+    const handler = (e)=>{ if(e.key==="Escape") onClose(); };
+    window.addEventListener("keydown",handler);
+    return ()=>window.removeEventListener("keydown",handler);
+  },[]);
+  return (
+    <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.92)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",animation:"fadeIn .15s ease",cursor:"zoom-out"}}>
+      <img src={src} alt={alt||""} onClick={e=>e.stopPropagation()}
+        style={{maxWidth:"90vw",maxHeight:"90vh",objectFit:"contain",borderRadius:8,boxShadow:"0 8px 60px rgba(0,0,0,.8)",animation:"scaleIn .2s ease"}}/>
+      <button onClick={onClose} style={{position:"absolute",top:20,right:24,background:"transparent",border:"none",color:C.text,fontSize:28,cursor:"pointer",opacity:.7,lineHeight:1}}>✕</button>
+    </div>
+  );
+};
+
+/* ─── TMDB ACTOR PHOTOS ──────────────────────────────── */
+async function fetchActorPhoto(tmdbName) {
+  try {
+    const r = await fetch(`https://api.themoviedb.org/3/search/person?api_key=${TMDB_KEY}&query=${encodeURIComponent(tmdbName)}&language=it-IT`);
+    const d = await r.json();
+    const path = d?.results?.[0]?.profile_path;
+    return path ? `https://image.tmdb.org/t/p/w185${path}` : null;
+  } catch { return null; }
+}
+
+/* ─── TMDB IMAGES (gallery) ──────────────────────────── */
+async function fetchMovieImages(title, type) {
+  try {
+    // First find movie/show ID
+    const endpoint = type==="serie"
+      ? `https://api.themoviedb.org/3/search/tv?api_key=${TMDB_KEY}&query=${encodeURIComponent(title)}&language=it-IT`
+      : `https://api.themoviedb.org/3/search/movie?api_key=${TMDB_KEY}&query=${encodeURIComponent(title)}&language=it-IT`;
+    const sr = await fetch(endpoint);
+    const sd = await sr.json();
+    const id = sd?.results?.[0]?.id;
+    if (!id) return [];
+    // Fetch images
+    const base = type==="serie" ? "tv" : "movie";
+    const ir = await fetch(`https://api.themoviedb.org/3/${base}/${id}/images?api_key=${TMDB_KEY}`);
+    const id2 = await ir.json();
+    const backdrops = (id2?.backdrops||[]).slice(0,8).map(b=>`https://image.tmdb.org/t/p/w780${b.file_path}`);
+    const posters = (id2?.posters||[]).slice(0,4).map(p=>`https://image.tmdb.org/t/p/w300${p.file_path}`);
+    return [...posters,...backdrops];
+  } catch { return []; }
+}
+
+
 const ApiDot = ({status, t}) => {
   const col = status==="ok"?C.green:status==="error"?C.red:status==="busy"?C.accent:C.dim;
   const label = status==="ok"?t.api_ok:status==="error"?t.api_err:status==="busy"?t.api_busy:"--";
@@ -560,166 +626,222 @@ const ProfileEditor = ({profiles,active,onSave,t}) => {
 };
 
 /* ─── DETAIL MODAL ───────────────────────────────────── */
-const DetailModal = ({item,onClose,lang,onStatus,onAddToLibrary}) => {
+const DetailModal = ({item,onClose,lang,onStatus,onAddToLibrary,onAddToWishlist}) => {
   const t = TR[lang]||TR.it;
-  const [tab,setTab]       = useState("trama");
-  const [data,setData]     = useState(null);
+  const [tab,setTab]         = useState("trama");
+  const [data,setData]       = useState(null);
   const [loading,setLoading] = useState(true);
-  const [err,setErr]       = useState(false);
-  const [poster,setPoster] = useState(item.poster||null);
-  const [trailer,setTrailer] = useState(null); // embed URL or YT search URL
+  const [err,setErr]         = useState(false);
+  const [poster,setPoster]   = useState(item.poster||null);
+  const [trailer,setTrailer] = useState(null);
+  const [gallery,setGallery] = useState([]);
+  const [lightbox,setLightbox] = useState(null);
+  const [castPhotos,setCastPhotos] = useState({});
+  const [added,setAdded]     = useState(false);
+  const [wishlisted,setWishlisted] = useState(false);
 
-  // Clean title: remove "(Korean Title) - 2016" patterns that break template literals
   const cleanTitle = item.title.replace(/\s*\([^)]{0,30}\)\s*[-\u2013]\s*\d{4}$/,"").replace(/\s*[-\u2013]\s*\d{4}$/,"").trim();
-  const [added,setAdded] = useState(false);
 
   useEffect(()=>{
-    load();
-    if (!poster) fetchPoster(cleanTitle, item.type).then(u=>{ if(u) setPoster(u); });
+    const esc = e=>{ if(e.key==="Escape") onClose(); };
+    window.addEventListener("keydown",esc);
+    return ()=>window.removeEventListener("keydown",esc);
   },[]);
 
   useEffect(()=>{
-    if (!data?.youtube_query) return;
-    const q = data.youtube_query;
-    const tryInvidious = async () => {
-      for (const base of ["https://iv.ggtyler.dev","https://invidious.privacydev.net"]) {
-        try {
-          const r = await fetch(base+"/api/v1/search?q="+encodeURIComponent(q)+"&type=video&fields=videoId",{signal:AbortSignal.timeout(4000)});
-          if (r.ok) { const d=await r.json(); const id=d?.[0]?.videoId; if(id) return "https://www.youtube-nocookie.com/embed/"+id+"?rel=0"; }
-        } catch {}
-      }
-      return "https://www.youtube.com/results?search_query="+encodeURIComponent(q);
-    };
-    tryInvidious().then(url=>setTrailer(url));
+    load();
+    if (!poster) fetchPoster(cleanTitle,item.type).then(u=>{ if(u) setPoster(u); });
+    if (item.type!=="gioco") fetchMovieImages(cleanTitle,item.type).then(imgs=>{ if(imgs.length>0) setGallery(imgs); });
+  },[]);
+
+  useEffect(()=>{
+    if (!data) return;
+    if (data.youtube_query) {
+      const q=data.youtube_query;
+      (async()=>{
+        for (const base of ["https://iv.ggtyler.dev","https://invidious.privacydev.net"]) {
+          try {
+            const r=await fetch(base+"/api/v1/search?q="+encodeURIComponent(q)+"&type=video&fields=videoId",{signal:AbortSignal.timeout(4000)});
+            if(r.ok){const d=await r.json();const id=d?.[0]?.videoId;if(id){setTrailer("https://www.youtube-nocookie.com/embed/"+id+"?rel=0");return;}}
+          } catch {}
+        }
+        setTrailer("https://www.youtube.com/results?search_query="+encodeURIComponent(q));
+      })();
+    }
+    if (Array.isArray(data.cast)) {
+      data.cast.forEach(actor=>{
+        const name=actor.tmdb_name||actor.nome;
+        if(name) fetchActorPhoto(name).then(url=>{ if(url) setCastPhotos(p=>({...p,[name]:url})); });
+      });
+    }
   },[data]);
 
   const load = async () => {
     setLoading(true); setErr(false);
-    const parse = (raw) => {
-      const s = (raw||"").replace(/```json|```/g,"").trim();
-      const start = s.indexOf("{");
-      const end = s.lastIndexOf("}");
-      if (start===-1||end===-1||end<=start) throw new Error("no json");
-      return JSON.parse(s.substring(start, end+1));
+    const parse=(raw)=>{
+      const s=(raw||"").replace(/```json|```/g,"").trim();
+      const start=s.indexOf("{"),end=s.lastIndexOf("}");
+      if(start===-1||end<=start) throw new Error("no json");
+      return JSON.parse(s.substring(start,end+1));
     };
-    // Check cache first — instant load
-    const cached = await getDetailCache(cleanTitle);
-    if (cached) { setData(cached); setLoading(false); return; }
-    // Not cached — fetch from API then save
+    const cached=await getDetailCache(cleanTitle);
+    if(cached){setData(cached);setLoading(false);return;}
     try {
-      const raw = await callClaude({messages:[{role:"user",content:DETAIL_PROMPT(cleanTitle,item.type,lang)}],withSearch:false,maxTokens:1800,onStatus});
-      const parsed = parse(raw);
-      setData(parsed);
-      setDetailCache(cleanTitle, parsed);
+      const raw=await callClaude({messages:[{role:"user",content:DETAIL_PROMPT(cleanTitle,item.type,lang)}],withSearch:false,maxTokens:1800,onStatus});
+      const parsed=parse(raw); setData(parsed); setDetailCache(cleanTitle,parsed);
     } catch {
       try {
-        const raw2 = await callClaude({messages:[{role:"user",content:DETAIL_PROMPT(cleanTitle,item.type,lang)+"\n\nRispondi SOLO con JSON valido. Inizia con { e termina con }."}],withSearch:false,maxTokens:1800,onStatus});
-        const parsed2 = parse(raw2);
-        setData(parsed2);
-        setDetailCache(cleanTitle, parsed2);
+        const raw2=await callClaude({messages:[{role:"user",content:DETAIL_PROMPT(cleanTitle,item.type,lang)+"\n\nRispondi SOLO JSON valido."}],withSearch:false,maxTokens:1800,onStatus});
+        const p2=parse(raw2); setData(p2); setDetailCache(cleanTitle,p2);
       } catch { setErr(true); }
     }
     setLoading(false);
   };
 
-  const handleAdd = () => { if(onAddToLibrary){onAddToLibrary({...item,title:cleanTitle});setAdded(true);} };
+  const handleAdd=()=>{ if(onAddToLibrary){onAddToLibrary({...item,title:cleanTitle});setAdded(true);} };
+  const handleWishlist=()=>{ if(onAddToWishlist){onAddToWishlist({...item,title:cleanTitle});setWishlisted(true);} };
 
+  const castArr = Array.isArray(data?.cast) ? data.cast : [];
   const TABS=[
     {id:"trama",label:t.dtab_trama},
     {id:"teorie",label:t.dtab_teorie},
     {id:"fatti",label:t.dtab_fatti},
     {id:"notare",label:t.dtab_notare},
     {id:"trailer",label:t.dtab_trailer||"TRAILER"},
+    ...(gallery.length>0?[{id:"galleria",label:lang==="ru"?"ГАЛЕРЕЯ":"GALLERIA"}]:[]),
     ...(item.type==="gioco"?[{id:"gameplay",label:t.dtab_game}]:[]),
   ];
-
-  const isEmbed = trailer?.includes("/embed/");
+  const isEmbed=trailer?.includes("/embed/");
 
   return (
-    <div style={{position:"fixed",inset:0,background:"#000000dd",zIndex:200,display:"flex",alignItems:"flex-end",justifyContent:"center"}} onClick={onClose}>
-      <div onClick={e=>e.stopPropagation()} style={{background:C.bg,width:"100%",maxWidth:720,maxHeight:"92vh",display:"flex",flexDirection:"column",borderTop:`1px solid ${C.border}`,borderLeft:`1px solid ${C.border}`,borderRight:`1px solid ${C.border}`,animation:"slideUp .25s cubic-bezier(.16,1,.3,1)"}}>
-
-        {/* ── HERO ── */}
-        <div style={{padding:"18px 20px",borderBottom:`1px solid ${C.border}`,display:"flex",gap:16,flexShrink:0}}>
-          {/* Poster */}
-          <div style={{width:70,height:100,flexShrink:0,borderRadius:2,overflow:"hidden",background:C.surface,display:"flex",alignItems:"center",justifyContent:"center"}}>
-            {poster
-              ? <img src={poster} alt="" style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/>
-              : <span style={{fontFamily:MONO,fontSize:18,fontWeight:700,color:TYPE_COL[item.type]||C.muted}}>{TYPE_CHAR[item.type]}</span>
-            }
-          </div>
-          {/* Meta */}
-          <div style={{flex:1,minWidth:0}}>
-            <div style={{fontFamily:MONO,fontSize:9,letterSpacing:2,color:TYPE_COL[item.type]||C.muted,marginBottom:4}}>
-              {item.type.toUpperCase()}{item.genre?` · ${item.genre.toUpperCase()}`:""}
-            </div>
-            <div style={{fontFamily:SANS,fontSize:20,fontWeight:900,color:C.text,lineHeight:1.15,marginBottom:6}}>{item.title}</div>
-            <div style={{display:"flex",flexWrap:"wrap",gap:8,alignItems:"center",marginBottom:4}}>
-              {data?.anno&&<span style={{fontFamily:MONO,fontSize:9,color:C.muted}}>{data.anno}</span>}
-              {data?.regista&&<span style={{fontFamily:MONO,fontSize:9,color:C.muted}}>· {data.regista}</span>}
-              {data?.durata&&<span style={{fontFamily:MONO,fontSize:9,color:C.dim}}>· {data.durata}</span>}
-            </div>
-            {data?.rating_critica&&<div style={{fontFamily:MONO,fontSize:9,color:C.accent,letterSpacing:.5}}>{data.rating_critica}</div>}
-            {data?.cast&&<div style={{fontFamily:SANS,fontSize:11,color:C.dim,marginTop:5,lineHeight:1.5}}>{data.cast}</div>}
-            {data?.simili?.length>0&&<div style={{display:"flex",gap:5,flexWrap:"wrap",marginTop:8}}>{data.simili.map((s,i)=><span key={i} style={{fontFamily:MONO,fontSize:8,padding:"2px 7px",border:`1px solid ${C.border}`,color:C.dim}}>{s}</span>)}</div>}
-            <button onClick={handleAdd} disabled={added} style={{marginTop:10,fontFamily:MONO,fontSize:8,letterSpacing:2,padding:"5px 12px",border:`1px solid ${added?C.green:C.accent}`,background:"transparent",color:added?C.green:C.accent,cursor:added?"default":"pointer",transition:"all .2s"}}>
-              {added?(lang==="ru"?"✓ ДОБАВЛЕНО":"✓ AGGIUNTO"):(lang==="ru"?"+ В БИБЛИОТЕКУ":"+ LIBRERIA")}
-            </button>
-          </div>
-          <button onClick={onClose} style={{background:"transparent",border:`1px solid ${C.border}`,color:C.muted,cursor:"pointer",fontFamily:MONO,fontSize:10,padding:"6px 10px",flexShrink:0,alignSelf:"flex-start"}}>ESC</button>
+    <>
+      {lightbox&&(
+        <div onClick={()=>setLightbox(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.95)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",cursor:"zoom-out",animation:"fadeIn .15s"}}>
+          <img src={lightbox} alt="" style={{maxWidth:"92vw",maxHeight:"92vh",objectFit:"contain",borderRadius:10,boxShadow:"0 8px 60px #000",animation:"scaleIn .2s ease"}} onClick={e=>e.stopPropagation()}/>
+          <button onClick={()=>setLightbox(null)} style={{position:"absolute",top:20,right:24,background:"transparent",border:"none",color:C.text,fontSize:28,cursor:"pointer",opacity:.7}}>✕</button>
         </div>
+      )}
+      <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.82)",zIndex:200,display:"flex",alignItems:"flex-end",justifyContent:"center"}} onClick={onClose}>
+        <div onClick={e=>e.stopPropagation()} style={{background:C.bg,width:"100%",maxWidth:760,maxHeight:"93vh",display:"flex",flexDirection:"column",borderRadius:"20px 20px 0 0",border:`1px solid ${C.border}`,borderBottom:"none",animation:"slideUp .3s cubic-bezier(.16,1,.3,1)",overflow:"hidden"}}>
 
-        {/* ── TABS ── */}
-        <div style={{display:"flex",borderBottom:`1px solid ${C.border}`,flexShrink:0,overflowX:"auto",scrollbarWidth:"none"}}>
-          {TABS.map(tb=>(
-            <button key={tb.id} onClick={()=>setTab(tb.id)} style={{flexShrink:0,padding:"10px 14px",border:"none",cursor:"pointer",background:"transparent",fontFamily:MONO,fontSize:9,letterSpacing:1.5,color:tab===tb.id?C.accent:C.dim,borderBottom:tab===tb.id?`2px solid ${C.accent}`:"2px solid transparent",transition:"all .15s"}}>
-              {tb.label}
-            </button>
-          ))}
-        </div>
-
-        {/* ── BODY ── */}
-        <div style={{flex:1,overflowY:"auto",padding:"20px",scrollbarWidth:"none"}}>
-          {loading&&<div style={{padding:"50px 0",textAlign:"center"}}><div style={{fontFamily:MONO,fontSize:10,letterSpacing:2,color:C.muted,animation:"pulse 1.5s infinite"}}>{t.detail_loading} {item.title}...<br/><span style={{color:C.dim,display:"block",marginTop:8,fontSize:9}}>{t.detail_loading2}</span></div></div>}
-          {err&&<div style={{padding:"40px 0",textAlign:"center"}}><div style={{fontFamily:MONO,fontSize:11,color:C.muted,marginBottom:16}}>{t.detail_err}</div><button onClick={load} style={{fontFamily:MONO,fontSize:10,letterSpacing:2,padding:"8px 20px",border:`1px solid ${C.border}`,background:"transparent",color:C.text,cursor:"pointer"}}>{t.retry}</button></div>}
-          {!loading&&!err&&data&&<>
-            {tab==="trama"&&<div>
-              <p style={{fontFamily:SANS,fontSize:14,lineHeight:1.95,color:C.body,margin:"0 0 20px"}} dangerouslySetInnerHTML={{__html:mdLight(data.trama)}}/>
-              {data.origine&&<><Divider label={t.detail_born}/><p style={{fontFamily:SANS,fontSize:13,lineHeight:1.8,color:C.muted,margin:0}}>{data.origine}</p></>}
-            </div>}
-            {tab==="teorie"&&<div>{(data.teorie||[]).map((th,i)=><div key={i} style={{borderBottom:`1px solid ${C.border}`,paddingBottom:16,marginBottom:16}}><div style={{fontFamily:MONO,fontSize:9,letterSpacing:2,color:C.accent,marginBottom:8}}>T{i+1} — {(th.titolo||"").toUpperCase()}</div><p style={{fontFamily:SANS,fontSize:13,lineHeight:1.8,color:C.body,margin:0}}>{th.descrizione}</p></div>)}</div>}
-            {tab==="fatti"&&<div>{(data.curiosita||[]).map((c,i)=><div key={i} style={{display:"flex",gap:16,borderBottom:`1px solid ${C.border}`,padding:"12px 0"}}><span style={{fontFamily:MONO,fontSize:10,color:C.dim,minWidth:24,letterSpacing:1}}>{String(i+1).padStart(2,"0")}</span><p style={{fontFamily:SANS,fontSize:13,lineHeight:1.8,color:C.body,margin:0}}>{c}</p></div>)}</div>}
-            {tab==="notare"&&<div>{(data.da_notare||[]).map((n,i)=><div key={i} style={{display:"flex",gap:16,borderBottom:`1px solid ${C.border}`,padding:"12px 0"}}><span style={{fontFamily:MONO,fontSize:10,color:C.accent,minWidth:24}}>→</span><p style={{fontFamily:SANS,fontSize:13,lineHeight:1.8,color:C.body,margin:0}}>{n}</p></div>)}</div>}
-            {tab==="trailer"&&<div>
-              {isEmbed ? (
-                <div style={{position:"relative",paddingBottom:"56.25%",height:0,overflow:"hidden",background:C.surface,marginBottom:12}}>
-                  <iframe src={trailer} title="trailer" frameBorder="0"
-                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                    allowFullScreen
-                    style={{position:"absolute",top:0,left:0,width:"100%",height:"100%"}}/>
+          {/* HERO */}
+          <div style={{padding:"20px 22px 16px",borderBottom:`1px solid ${C.border}`,display:"flex",gap:16,flexShrink:0}}>
+            <div onClick={()=>poster&&setLightbox(poster)} style={{width:80,height:114,flexShrink:0,borderRadius:10,overflow:"hidden",background:C.surface,cursor:poster?"zoom-in":"default",boxShadow:"0 4px 24px rgba(0,0,0,.5)",transition:"transform .2s"}}
+              onMouseEnter={e=>{if(poster)e.currentTarget.style.transform="scale(1.03)"}}
+              onMouseLeave={e=>e.currentTarget.style.transform="scale(1)"}>
+              {poster
+                ? <img src={poster} alt="" style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/>
+                : <div style={{width:"100%",height:"100%",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:MONO,fontSize:20,color:C.dim}}>{TYPE_CHAR[item.type]}</div>
+              }
+            </div>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontFamily:MONO,fontSize:8,letterSpacing:2,color:C.accent,marginBottom:4}}>{item.type.toUpperCase()}{item.genre?` · ${item.genre.toUpperCase()}`:""}</div>
+              <div style={{fontFamily:SANS,fontSize:19,fontWeight:700,color:C.text,lineHeight:1.2,marginBottom:6}}>{item.title}</div>
+              <div style={{display:"flex",flexWrap:"wrap",gap:8,alignItems:"center",marginBottom:4}}>
+                {data?.anno&&<span style={{fontFamily:MONO,fontSize:9,color:C.muted}}>{data.anno}</span>}
+                {data?.regista&&<span style={{fontFamily:MONO,fontSize:9,color:C.muted}}>· {data.regista}</span>}
+                {data?.durata&&<span style={{fontFamily:MONO,fontSize:9,color:C.dim}}>· {data.durata}</span>}
+                {data?.rating_critica&&<span style={{fontFamily:MONO,fontSize:9,color:C.accent}}>· {data.rating_critica}</span>}
+              </div>
+              {/* Cast circles */}
+              {castArr.length>0&&(
+                <div style={{display:"flex",gap:8,marginTop:8,flexWrap:"wrap"}}>
+                  {castArr.slice(0,5).map((actor,i)=>{
+                    const name=actor.tmdb_name||actor.nome;
+                    const photo=castPhotos[name];
+                    return (
+                      <div key={i} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3,cursor:photo?"zoom-in":"default"}}
+                        onClick={()=>photo&&setLightbox(photo)}>
+                        <div style={{width:36,height:36,borderRadius:"50%",overflow:"hidden",background:C.surface,border:`2px solid ${C.border}`}}>
+                          {photo
+                            ? <img src={photo} alt={actor.nome} style={{width:"100%",height:"100%",objectFit:"cover"}}/>
+                            : <div style={{width:"100%",height:"100%",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:MONO,fontSize:11,color:C.dim}}>{(actor.nome||"?")[0]}</div>
+                          }
+                        </div>
+                        <div style={{fontFamily:SANS,fontSize:8,color:C.dim,textAlign:"center",maxWidth:52,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{actor.personaggio||actor.nome}</div>
+                      </div>
+                    );
+                  })}
                 </div>
-              ) : trailer ? (
-                <div style={{padding:"40px 0",textAlign:"center"}}>
-                  <div style={{fontFamily:MONO,fontSize:9,color:C.dim,letterSpacing:2,marginBottom:20}}>PREVIEW NON DISPONIBILE</div>
-                  <a href={trailer} target="_blank" rel="noopener noreferrer"
-                    style={{fontFamily:MONO,fontSize:10,letterSpacing:2,padding:"12px 24px",border:`1px solid ${C.accent}`,color:C.accent,textDecoration:"none",display:"inline-block"}}>
-                    APRI TRAILER SU YOUTUBE →
-                  </a>
-                </div>
-              ) : (
-                <div style={{padding:"40px 0",textAlign:"center",fontFamily:MONO,fontSize:10,color:C.dim,letterSpacing:2,animation:"pulse 1s infinite"}}>RICERCA TRAILER...</div>
               )}
-            </div>}
-            {tab==="gameplay"&&item.type==="gioco"&&<div>
-              {data.gameplay_tips?.length>0&&<><div style={{fontFamily:MONO,fontSize:9,letterSpacing:2,color:C.green,marginBottom:12}}>{t.detail_tips}</div>{data.gameplay_tips.map((tip,i)=><div key={i} style={{display:"flex",gap:16,borderBottom:`1px solid ${C.border}`,padding:"10px 0"}}><span style={{fontFamily:MONO,fontSize:10,color:C.green,minWidth:20}}>+</span><p style={{fontFamily:SANS,fontSize:13,lineHeight:1.8,color:C.body,margin:0}}>{tip}</p></div>)}</>}
-              {data.achievements?.length>0&&<><Divider label={t.detail_ach}/>{data.achievements.map((a,i)=>{const dc={facile:[C.green,"E"],medio:[C.accent,"M"],difficile:[C.red,"H"]};const[col,ch]=dc[a.difficolta]||[C.muted,"?"];return <div key={i} style={{borderBottom:`1px solid ${C.border}`,padding:"10px 0"}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><span style={{fontFamily:MONO,fontSize:11,color:C.text}}>{a.nome}</span><span style={{fontFamily:MONO,fontSize:9,color:col,border:`1px solid ${col}`,padding:"1px 6px"}}>{ch}</span></div><p style={{fontFamily:SANS,fontSize:12,color:C.muted,margin:0,lineHeight:1.6}}>{a.come}</p></div>;})}}</> }
-            </div>}
-          </>}
+              {/* Buttons */}
+              <div style={{display:"flex",gap:6,marginTop:10,flexWrap:"wrap"}}>
+                <button onClick={handleAdd} disabled={added} style={{fontFamily:MONO,fontSize:8,letterSpacing:1.5,padding:"5px 14px",borderRadius:20,border:`1px solid ${added?C.pistachio:C.accent}`,background:added?C.pistaDim:C.accentDim,color:added?C.pistachio:C.accent,cursor:added?"default":"pointer",transition:"all .2s"}}>
+                  {added?(lang==="ru"?"✓ БИБЛИОТЕКА":"✓ LIBRERIA"):(lang==="ru"?"+ БИБЛИОТЕКА":"+ LIBRERIA")}
+                </button>
+                <button onClick={handleWishlist} disabled={wishlisted} style={{fontFamily:MONO,fontSize:8,letterSpacing:1.5,padding:"5px 14px",borderRadius:20,border:`1px solid ${wishlisted?C.pistachio:C.border}`,background:wishlisted?C.pistaDim:"transparent",color:wishlisted?C.pistachio:C.muted,cursor:wishlisted?"default":"pointer",transition:"all .2s"}}>
+                  {wishlisted?(lang==="ru"?"✓ СПИСОК":"✓ LISTA"):(lang==="ru"?"+ СПИСОК":"+ LISTA")}
+                </button>
+              </div>
+            </div>
+            <button onClick={onClose} style={{background:"transparent",border:`1px solid ${C.border}`,borderRadius:20,color:C.muted,cursor:"pointer",fontFamily:MONO,fontSize:9,padding:"5px 10px",flexShrink:0,alignSelf:"flex-start"}}>ESC</button>
+          </div>
+
+          {/* GALLERY STRIP */}
+          {gallery.length>0&&(
+            <div style={{display:"flex",gap:5,padding:"8px 22px",overflowX:"auto",scrollbarWidth:"none",borderBottom:`1px solid ${C.border}`,flexShrink:0}}>
+              {gallery.slice(0,12).map((img,i)=>(
+                <div key={i} onClick={()=>setLightbox(img)} style={{flexShrink:0,width:88,height:52,borderRadius:6,overflow:"hidden",cursor:"zoom-in",opacity:.75,transition:"opacity .15s"}}
+                  onMouseEnter={e=>e.currentTarget.style.opacity="1"}
+                  onMouseLeave={e=>e.currentTarget.style.opacity=".75"}>
+                  <img src={img} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* TABS */}
+          <div style={{display:"flex",borderBottom:`1px solid ${C.border}`,flexShrink:0,overflowX:"auto",scrollbarWidth:"none"}}>
+            {TABS.map(tb=>(
+              <button key={tb.id} onClick={()=>setTab(tb.id)} style={{flexShrink:0,padding:"11px 16px",border:"none",cursor:"pointer",background:"transparent",fontFamily:MONO,fontSize:8,letterSpacing:1.5,color:tab===tb.id?C.accent:C.dim,borderBottom:tab===tb.id?`2px solid ${C.accent}`:"2px solid transparent",transition:"all .15s"}}>
+                {tb.label}
+              </button>
+            ))}
+          </div>
+
+          {/* BODY */}
+          <div style={{flex:1,overflowY:"auto",padding:"20px 22px",scrollbarWidth:"none"}}>
+            {loading&&<div style={{padding:"50px 0",textAlign:"center"}}><div style={{fontFamily:MONO,fontSize:10,letterSpacing:2,color:C.muted,animation:"pulse 1.5s infinite"}}>{t.detail_loading} {cleanTitle}...<br/><span style={{color:C.dim,display:"block",marginTop:8,fontSize:9}}>{t.detail_loading2}</span></div></div>}
+            {err&&<div style={{padding:"40px 0",textAlign:"center"}}><div style={{fontFamily:MONO,fontSize:11,color:C.muted,marginBottom:16}}>{t.detail_err}</div><button onClick={load} style={{fontFamily:MONO,fontSize:10,letterSpacing:2,padding:"8px 20px",border:`1px solid ${C.border}`,borderRadius:20,background:"transparent",color:C.text,cursor:"pointer"}}>{t.retry}</button></div>}
+            {!loading&&!err&&data&&<>
+              {tab==="trama"&&<div>
+                <p style={{fontFamily:SANS,fontSize:14,lineHeight:1.95,color:C.body,margin:"0 0 20px"}} dangerouslySetInnerHTML={{__html:mdLight(data.trama)}}/>
+                {data.origine&&<><Divider label={t.detail_born}/><p style={{fontFamily:SANS,fontSize:13,lineHeight:1.8,color:C.muted,margin:"0 0 20px"}}>{data.origine}</p></>}
+                {data.simili?.length>0&&<><Divider label={t.detail_similar}/><div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{data.simili.map((s,i)=><span key={i} style={{fontFamily:MONO,fontSize:8,padding:"3px 10px",border:`1px solid ${C.border}`,borderRadius:20,color:C.muted}}>{s}</span>)}</div></>}
+              </div>}
+              {tab==="teorie"&&<div>{(data.teorie||[]).map((th,i)=><div key={i} style={{borderBottom:`1px solid ${C.border}`,paddingBottom:16,marginBottom:16}}><div style={{fontFamily:MONO,fontSize:9,letterSpacing:2,color:C.accent,marginBottom:8}}>T{i+1} — {(th.titolo||"").toUpperCase()}</div><p style={{fontFamily:SANS,fontSize:13,lineHeight:1.8,color:C.body,margin:0}}>{th.descrizione}</p></div>)}</div>}
+              {tab==="fatti"&&<div>{(data.curiosita||[]).map((c,i)=><div key={i} style={{display:"flex",gap:16,borderBottom:`1px solid ${C.border}`,padding:"12px 0"}}><span style={{fontFamily:MONO,fontSize:10,color:C.dim,minWidth:24}}>{String(i+1).padStart(2,"0")}</span><p style={{fontFamily:SANS,fontSize:13,lineHeight:1.8,color:C.body,margin:0}}>{c}</p></div>)}</div>}
+              {tab==="notare"&&<div>{(data.da_notare||[]).map((n,i)=><div key={i} style={{display:"flex",gap:16,borderBottom:`1px solid ${C.border}`,padding:"12px 0"}}><span style={{fontFamily:MONO,fontSize:10,color:C.accent,minWidth:24}}>→</span><p style={{fontFamily:SANS,fontSize:13,lineHeight:1.8,color:C.body,margin:0}}>{n}</p></div>)}</div>}
+              {tab==="galleria"&&<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:8}}>
+                {gallery.map((img,i)=><div key={i} onClick={()=>setLightbox(img)} style={{borderRadius:8,overflow:"hidden",cursor:"zoom-in",aspectRatio:"16/9",background:C.surface}}><img src={img} alt="" style={{width:"100%",height:"100%",objectFit:"cover",transition:"transform .2s"}} onMouseEnter={e=>e.currentTarget.style.transform="scale(1.04)"} onMouseLeave={e=>e.currentTarget.style.transform="scale(1)"}/></div>)}
+              </div>}
+              {tab==="trailer"&&<div>
+                {isEmbed?(
+                  <div style={{position:"relative",paddingBottom:"56.25%",height:0,overflow:"hidden",background:C.surface,borderRadius:10}}>
+                    <iframe src={trailer} title="trailer" frameBorder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen style={{position:"absolute",top:0,left:0,width:"100%",height:"100%",borderRadius:10}}/>
+                  </div>
+                ):trailer?(
+                  <div style={{padding:"40px 0",textAlign:"center"}}>
+                    <a href={trailer} target="_blank" rel="noopener noreferrer" style={{fontFamily:MONO,fontSize:10,letterSpacing:2,padding:"12px 24px",border:`1px solid ${C.accent}`,borderRadius:20,color:C.accent,textDecoration:"none",display:"inline-block"}}>
+                      {lang==="ru"?"ОТКРЫТЬ НА YOUTUBE →":"APRI SU YOUTUBE →"}
+                    </a>
+                  </div>
+                ):(
+                  <div style={{padding:"40px 0",textAlign:"center",fontFamily:MONO,fontSize:10,color:C.dim,animation:"pulse 1s infinite"}}>{lang==="ru"?"ПОИСК...":"RICERCA..."}</div>
+                )}
+              </div>}
+              {tab==="gameplay"&&item.type==="gioco"&&<div>
+                {data.gameplay_tips?.length>0&&<><div style={{fontFamily:MONO,fontSize:9,letterSpacing:2,color:C.pistachio,marginBottom:12}}>{t.detail_tips}</div>{data.gameplay_tips.map((tip,i)=><div key={i} style={{display:"flex",gap:16,borderBottom:`1px solid ${C.border}`,padding:"10px 0"}}><span style={{fontFamily:MONO,fontSize:10,color:C.pistachio}}>+</span><p style={{fontFamily:SANS,fontSize:13,lineHeight:1.8,color:C.body,margin:0}}>{tip}</p></div>)}</>}
+                {data.achievements?.length>0&&<><Divider label={t.detail_ach}/>{data.achievements.map((a,i)=>{const dc={facile:[C.pistachio,"E"],medio:[C.accent,"M"],difficile:[C.red,"H"]};const[col,ch]=dc[a.difficolta]||[C.muted,"?"];return<div key={i} style={{borderBottom:`1px solid ${C.border}`,padding:"10px 0"}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><span style={{fontFamily:MONO,fontSize:11,color:C.text}}>{a.nome}</span><span style={{fontFamily:MONO,fontSize:9,color:col,border:`1px solid ${col}`,padding:"1px 6px",borderRadius:4}}>{ch}</span></div><p style={{fontFamily:SANS,fontSize:12,color:C.muted,margin:0,lineHeight:1.6}}>{a.come}</p></div>;})}</> }
+              </div>}
+            </>}
+          </div>
         </div>
       </div>
-    </div>
+    </>
   );
 };
+
 
 /* ─── MISSION MODE (with save/load) ──────────────────── */
 const MissionMode = ({lang,onStatus,savedMissions,onSaveMission,onDeleteMission}) => {
@@ -993,6 +1115,107 @@ const LockScreen = ({ onUnlock }) => {
 };
 
 /* ─── MAIN APP ───────────────────────────────────────── */
+
+/* ─── CHAT MESSAGE (outside App to prevent re-render on keystrokes) ─── */
+const ChatMessage = React.memo(function ChatMessage({m, onItemClick}) {
+  const [posters,setPosters] = React.useState({});
+  const isUser = m.role==="user";
+
+  const guessType = (title, content) => {
+    const lower = (content||"").toLowerCase();
+    if (lower.includes("gioco")||lower.includes("game")||lower.includes("videogioco")||lower.includes("игр")) return "gioco";
+    if (lower.includes("serie")||lower.includes("сериал")) return "serie";
+    return "film";
+  };
+
+  const parseRows = (content) => {
+    const rows = [];
+    (content||"").split("\n").forEach(line => {
+      const headerCheck = line.match(/^\*\*([^*]+)\*\*\s*[:\-]?\s*$/);
+      if (headerCheck && headerCheck[1].trim().length < 50) return;
+      const match = line.match(/^[^*]*\*\*([^*]{2,80})\*\*\s*[-–]?\s*(.*)/);
+      if (!match) return;
+      const fullTitle = match[1].trim();
+      const desc = match[2].trim();
+      const cleanedTitle = fullTitle.replace(/\s*\(\d{4}\)\s*$/,"").replace(/\s*[-–]\s*\d{4}$/,"").trim();
+      if (cleanedTitle.length < 2) return;
+      rows.push({ raw:line, title:cleanedTitle, fullTitle, desc, type:guessType(fullTitle,content) });
+    });
+    return rows;
+  };
+
+  const rows = isUser ? [] : parseRows(m.content);
+
+  React.useEffect(()=>{
+    if (isUser||rows.length===0) return;
+    rows.forEach(({title,type})=>{
+      if (window._posterCache?.[title]) { setPosters(p=>({...p,[title]:window._posterCache[title]})); return; }
+      fetchPoster(title,type).then(url=>{
+        if (url) { window._posterCache=window._posterCache||{}; window._posterCache[title]=url; setPosters(p=>({...p,[title]:url})); return; }
+        const fallback=type==="gioco"?"film":type==="film"?"serie":"film";
+        fetchPoster(title,fallback).then(u=>{ if(u){ window._posterCache=window._posterCache||{}; window._posterCache[title]=u; setPosters(p=>({...p,[title]:u})); }});
+      });
+    });
+  },[m.content]);
+
+  const renderContent = () => {
+    if (rows.length===0) return (
+      <div style={{padding:"12px 16px",color:isUser?C.bg:C.body,fontFamily:SANS,fontSize:14,lineHeight:1.72}}
+        dangerouslySetInnerHTML={{__html:mdLight(m.content)}}/>
+    );
+    const segments=[];
+    let remaining=m.content;
+    rows.forEach(row=>{
+      const idx=remaining.indexOf(row.raw);
+      if(idx>0) segments.push({type:"text",content:remaining.substring(0,idx)});
+      segments.push({type:"item",...row});
+      remaining=remaining.substring(idx+row.raw.length);
+    });
+    if(remaining.trim()) segments.push({type:"text",content:remaining});
+
+    return segments.map((seg,i)=>{
+      if(seg.type==="text"){
+        const clean=seg.content.trim(); if(!clean) return null;
+        return <div key={i} style={{padding:"10px 16px",color:C.body,fontFamily:SANS,fontSize:14,lineHeight:1.72}}
+          dangerouslySetInnerHTML={{__html:mdLight(clean)}}/>;
+      }
+      const poster=posters[seg.title];
+      return (
+        <div key={i} onClick={()=>onItemClick({title:seg.title,type:seg.type==="gioco"?"gioco":"film",genre:""})}
+          style={{display:"flex",alignItems:"stretch",cursor:"pointer",borderTop:`1px solid rgba(255,255,255,.05)`,transition:"background .15s",minHeight:88}}
+          onMouseEnter={e=>e.currentTarget.style.background=C.accentDim}
+          onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+          <div style={{flex:1,padding:"12px 12px 12px 16px",minWidth:0,display:"flex",flexDirection:"column",justifyContent:"center"}}>
+            <div style={{fontFamily:SANS,fontSize:14,fontWeight:600,color:C.text,marginBottom:3,lineHeight:1.2}}>{seg.fullTitle}</div>
+            {seg.desc&&<div style={{fontFamily:SANS,fontSize:12,color:C.muted,lineHeight:1.6,display:"-webkit-box",WebkitLineClamp:3,WebkitBoxOrient:"vertical",overflow:"hidden"}}
+              dangerouslySetInnerHTML={{__html:mdLight(seg.desc)}}/>}
+            <div style={{fontFamily:MONO,fontSize:8,color:C.accent,marginTop:5,letterSpacing:1}}>APRI →</div>
+          </div>
+          <div style={{width:68,flexShrink:0,overflow:"hidden",background:C.surface}}>
+            {poster
+              ? <img src={poster} alt={seg.title} style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/>
+              : <div style={{width:"100%",height:"100%",minHeight:88,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:MONO,fontSize:13,color:C.dim}}>{seg.type==="gioco"?"G":"F"}</div>
+            }
+          </div>
+        </div>
+      );
+    });
+  };
+
+  const br = isUser ? "18px 18px 4px 18px" : "18px 18px 18px 4px";
+  return (
+    <div style={{alignSelf:isUser?"flex-end":"flex-start",maxWidth:"88%",marginBottom:8,animation:"fadeIn .2s"}}>
+      <div style={{background:isUser?C.accent:C.surface,borderRadius:br,overflow:"hidden",boxShadow:"0 2px 8px rgba(0,0,0,.35)"}}>
+        {isUser
+          ? <div style={{padding:"11px 16px",color:C.bg,fontFamily:SANS,fontSize:14,lineHeight:1.7}}
+              dangerouslySetInnerHTML={{__html:mdLight(m.content)}}/>
+          : renderContent()
+        }
+      </div>
+    </div>
+  );
+});
+
 export default function ReelBot() {
   const [profiles,setProfiles]   = useState(DEF_PROF);
   const [active,setActive]       = useState("tu");
@@ -1001,7 +1224,9 @@ export default function ReelBot() {
   const [mood,setMood]           = useState(null);
   // Per-profile chat histories
   const [chats,setChats]         = useState({ tu:null, lei:null });
-  const [input,setInput]         = useState("");
+  const [input,setInput] = useState("");
+  // Use ref for real-time value to avoid re-renders during typing
+  const inputValRef = useRef("");
   const [chatLoading,setChatLoading] = useState(false);
   const [selected,setSelected]   = useState(null);
   const [libFilter,setLibFilter] = useState({type:"all",profile:"all"});
@@ -1183,166 +1408,38 @@ export default function ReelBot() {
   if (!authed) return <LockScreen onUnlock={handleUnlock}/>;
 
   // ── SHARED CONTENT PANELS ──
+  // ChatMessage is defined outside App (below export) to prevent re-render on keystrokes
 
-  // ChatMessage — Apple-style bubbles, film rows with poster RIGHT
-  const ChatMessage = ({m, onItemClick}) => {
-    const [posters,setPosters] = useState({});
-    const isUser = m.role==="user";
 
-    // In-memory poster cache for speed (shared across messages)
-    const guessType = (title, content) => {
-      const lower = (content||"").toLowerCase();
-      if (lower.includes("gioco") || lower.includes("game") || lower.includes("videogioco") || lower.includes("игр")) return "gioco";
-      if (lower.includes("serie") || lower.includes("сериал")) return "serie";
-      return "film";
-    };
-
-    // Parse rows — handles ALL bot formats:
-    // "- **Title (2012)** - desc", "📽️ **Title** desc", "**Title** - desc", etc.
-    const parseRows = (content) => {
-      const rows = [];
-      (content||"").split("\n").forEach(line => {
-        // Skip obvious category headers (e.g. "**PER TE DA SOLO:**")
-        const headerCheck = line.match(/^\*\*([^*]+)\*\*\s*[:\-]?\s*$/);
-        if (headerCheck && headerCheck[1].trim().length < 50) return;
-        // Match any line containing **Title** with or without prefix
-        const match = line.match(/^[^*]*\*\*([^*]{2,80})\*\*\s*[-–]?\s*(.*)/);
-        if (!match) return;
-        const fullTitle = match[1].trim();
-        const desc = match[2].trim();
-        const cleanedTitle = fullTitle
-          .replace(/\s*\(\d{4}\)\s*$/,"")
-          .replace(/\s*[-–]\s*\d{4}$/,"")
-          .trim();
-        if (cleanedTitle.length < 2) return;
-        rows.push({ raw: line, title: cleanedTitle, fullTitle, desc, type: guessType(fullTitle, content) });
-      });
-      return rows;
-    };
-
-    const rows = isUser ? [] : parseRows(m.content);
-
-    useEffect(()=>{
-      if (isUser || rows.length===0) return;
-      rows.forEach(({title, type})=>{
-        // Check in-memory cache first
-        if (window._posterCache?.[title]) {
-          setPosters(p=>({...p,[title]:window._posterCache[title]}));
-          return;
-        }
-        fetchPoster(title, type).then(url=>{
-          if (url) {
-            window._posterCache = window._posterCache||{};
-            window._posterCache[title] = url;
-            setPosters(p=>({...p,[title]:url}));
-            return;
-          }
-          // Fallback: try serie then film
-          const fallback = type==="gioco"?"film":type==="film"?"serie":"film";
-          fetchPoster(title, fallback).then(u=>{
-            if(u) {
-              window._posterCache = window._posterCache||{};
-              window._posterCache[title] = u;
-              setPosters(p=>({...p,[title]:u}));
-            }
-          });
-        });
-      });
-    },[m.content]);
-
-    const renderContent = () => {
-      if (rows.length===0) return (
-        <div style={{padding:"12px 16px",color:isUser?C.bg:C.body,fontFamily:SANS,fontSize:14,lineHeight:1.72,letterSpacing:.1}}
-          dangerouslySetInnerHTML={{__html:mdLight(m.content)}}/>
-      );
-      // Split into text + film segments
-      const segments = [];
-      let remaining = m.content;
-      rows.forEach(row=>{
-        const idx = remaining.indexOf(row.raw);
-        if (idx>0) segments.push({type:"text",content:remaining.substring(0,idx)});
-        segments.push({type:"item",...row});
-        remaining = remaining.substring(idx+row.raw.length);
-      });
-      if (remaining.trim()) segments.push({type:"text",content:remaining});
-
-      return segments.map((seg,i)=>{
-        if (seg.type==="text") {
-          const clean=seg.content.trim(); if(!clean) return null;
-          return <div key={i} style={{padding:"10px 16px",color:C.body,fontFamily:SANS,fontSize:14,lineHeight:1.72,letterSpacing:.1}}
-            dangerouslySetInnerHTML={{__html:mdLight(clean)}}/>;
-        }
-        const poster=posters[seg.title];
-        return (
-          <div key={i} onClick={()=>onItemClick({title:seg.title,type:seg.type_==="gioco"?"gioco":"film",genre:""})}
-            style={{display:"flex",alignItems:"stretch",gap:0,cursor:"pointer",borderTop:`1px solid rgba(255,255,255,.06)`,transition:"background .15s",minHeight:90}}
-            onMouseEnter={e=>e.currentTarget.style.background="rgba(200,255,0,.06)"}
-            onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-            {/* Text LEFT */}
-            <div style={{flex:1,padding:"12px 14px 12px 16px",minWidth:0,display:"flex",flexDirection:"column",justifyContent:"center"}}>
-              <div style={{fontFamily:SANS,fontSize:14,fontWeight:700,color:C.text,marginBottom:4,letterSpacing:-.1,lineHeight:1.2}}>{seg.fullTitle}</div>
-              {seg.desc&&<div style={{fontFamily:SANS,fontSize:12,color:C.muted,lineHeight:1.65,display:"-webkit-box",WebkitLineClamp:3,WebkitBoxOrient:"vertical",overflow:"hidden"}}
-                dangerouslySetInnerHTML={{__html:mdLight(seg.desc)}}/>}
-              <div style={{fontFamily:MONO,fontSize:9,color:C.accent,marginTop:6,letterSpacing:1}}>TAP →</div>
-            </div>
-            {/* Poster RIGHT */}
-            <div style={{width:70,flexShrink:0,borderRadius:"0 0 0 0",overflow:"hidden",background:C.border,position:"relative"}}>
-              {poster
-                ? <img src={poster} alt={seg.title} style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/>
-                : <div style={{width:"100%",height:"100%",minHeight:90,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:MONO,fontSize:14,color:C.dim}}>{seg.type==="gioco"?"G":"F"}</div>
-              }
-            </div>
-          </div>
-        );
-      });
-    };
-
-    // Apple-style bubble radii
-    const br = isUser
-      ? "18px 18px 4px 18px"
-      : "18px 18px 18px 4px";
-
-    return (
-      <div style={{alignSelf:isUser?"flex-end":"flex-start",maxWidth:"88%",marginBottom:8,animation:"fadeIn .2s"}}>
-        <div style={{background:isUser?"#1a8cff":C.surface,borderRadius:br,overflow:"hidden",boxShadow:"0 1px 6px rgba(0,0,0,.3)"}}>
-          {isUser
-            ? <div style={{padding:"11px 16px",color:"#fff",fontFamily:SANS,fontSize:14,lineHeight:1.7}}
-                dangerouslySetInnerHTML={{__html:mdLight(m.content)}}/>
-            : renderContent()
-          }
-        </div>
-      </div>
-    );
-  };
 
   const ChatPanel = ({maxH}) => (
-    <>
+    <div style={{display:"flex",flexDirection:"column",flex:1,minHeight:0,height:maxH||"100%"}}>
       <MoodSelector selected={mood} onSelect={setMood} t={t}/>
-      <div style={{overflowY:"auto",display:"flex",flexDirection:"column",gap:4,padding:"8px 4px 10px",flex:1,maxHeight:maxH||undefined,scrollbarWidth:"none"}}>
+      <div style={{overflowY:"auto",display:"flex",flexDirection:"column",gap:4,padding:"8px 8px 10px",flex:1,scrollbarWidth:"none"}}>
         {(messages||[]).map((m,i)=>(
-          <ChatMessage key={i} m={m} onItemClick={setSelected}/>
+          <ChatMessage key={`${active}-${i}`} m={m} onItemClick={setSelected}/>
         ))}
         {chatLoading&&(
           <div style={{alignSelf:"flex-start",background:C.surface,borderRadius:"18px 18px 18px 4px",padding:"12px 18px",boxShadow:"0 1px 6px rgba(0,0,0,.3)"}}>
             <div style={{display:"flex",gap:5,alignItems:"center"}}>
-              {[0,1,2].map(i=><div key={i} style={{width:6,height:6,borderRadius:"50%",background:C.accent,animation:`pulse 1s infinite`,animationDelay:`${i*0.2}s`}}/>)}
+              {[0,1,2].map(i=><div key={i} style={{width:6,height:6,borderRadius:"50%",background:C.accent,animation:"pulse 1s infinite",animationDelay:`${i*0.2}s`}}/>)}
             </div>
           </div>
         )}
         <div ref={endRef}/>
       </div>
-      <div style={{padding:"10px 0 14px",display:"flex",gap:8,alignItems:"flex-end",borderTop:`1px solid ${C.border}`,flexShrink:0}}>
-        <textarea ref={inputRef} rows={isDesktop?3:1} value={input}
+      <div style={{padding:"10px 0 14px",display:"flex",gap:8,alignItems:"flex-end",borderTop:`1px solid ${C.border}`,flexShrink:0,background:C.bg}}>
+        <textarea ref={inputRef} rows={isDesktop?3:2} value={input}
           onChange={e=>setInput(e.target.value)}
           onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send();}}}
           placeholder={t.chat_ph}
-          style={{flex:1,background:C.surface,border:`1px solid ${C.border}`,borderRadius:14,padding:"10px 14px",color:C.text,fontSize:14,fontFamily:SANS,resize:"none",letterSpacing:.2,lineHeight:1.5}}/>
+          style={{flex:1,background:C.surface,border:`1px solid ${C.border}`,borderRadius:14,padding:"10px 14px",color:C.text,fontSize:14,fontFamily:SANS,resize:"none",letterSpacing:.2,lineHeight:1.5,outline:"none"}}/>
         <div style={{display:"flex",flexDirection:"column",gap:6,flexShrink:0,alignSelf:"stretch"}}>
           <button onClick={send} disabled={chatLoading} style={{flex:1,background:chatLoading?"transparent":C.accent,border:`1px solid ${chatLoading?C.border:C.accent}`,borderRadius:10,color:chatLoading?C.dim:C.bg,fontFamily:MONO,fontSize:10,letterSpacing:2,padding:"0 16px",cursor:chatLoading?"not-allowed":"pointer",transition:"all .15s",display:"flex",alignItems:"center",justifyContent:"center"}}>GO</button>
           <button onClick={clearChat} title={t.chat_clear} style={{background:"transparent",border:`1px solid ${C.border}`,borderRadius:8,color:C.dim,fontFamily:MONO,fontSize:9,padding:"6px 10px",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",letterSpacing:1}}>CLR</button>
         </div>
       </div>
-    </>
+    </div>
   );
 
   const LibPanel = () => (
@@ -1446,16 +1543,18 @@ export default function ReelBot() {
     return (
       <div style={{fontFamily:SANS,background:C.bg,minHeight:"100vh",color:C.text,display:"flex",flexDirection:"column"}}>
         <style>{`
-          @keyframes fadeIn{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:translateY(0)}}
+          @keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+          @keyframes scaleIn{from{opacity:0;transform:scale(.95)}to{opacity:1;transform:scale(1)}}
           @keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
           @keyframes slideDown{from{opacity:0;transform:translate(-50%,-8px)}to{opacity:1;transform:translate(-50%,0)}}
           @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+          @keyframes shimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}
           *::-webkit-scrollbar{display:none}
           input,textarea{transition:border-color .15s;}
           input:focus,textarea:focus{border-color:${C.accent}!important;outline:none;}
         `}</style>
         <Notif msg={notif}/>
-        {selected&&<DetailModal item={selected} onClose={()=>setSelected(null)} lang={lang} onStatus={setApiStatus} onAddToLibrary={(it)=>{ applyAction({op:"add",dest:"library",profile:active,title:it.title,type:it.type||"film",genre:it.genre||"",status:"finito",hours:2}); setSelected(null); }}/>}
+        {selected&&<DetailModal item={selected} onClose={()=>setSelected(null)} lang={lang} onStatus={setApiStatus} onAddToLibrary={(it)=>{ applyAction({op:"add",dest:"library",profile:active,title:it.title,type:it.type||"film",genre:it.genre||"",status:"finito",hours:2}); }} onAddToWishlist={(it)=>{ applyAction({op:"add",dest:"wishlist",profile:active,title:it.title,type:it.type||"film",genre:it.genre||""}); }}/>}
         <Header/>
         <div style={{display:"flex",flex:1,overflow:"hidden"}}>
           {/* LEFT SIDEBAR */}
@@ -1497,35 +1596,7 @@ export default function ReelBot() {
 
             {/* Panels — desktop uses full height flex */}
             <div style={{flex:1,display:"flex",flexDirection:"column",minHeight:0,overflow:"hidden"}}>
-              {desktopRight==="chat" && (
-                <div style={{display:"flex",flexDirection:"column",flex:1,minHeight:0}}>
-                  <MoodSelector selected={mood} onSelect={setMood} t={t}/>
-                  <div style={{overflowY:"auto",display:"flex",flexDirection:"column",gap:4,flex:1,padding:"8px 4px 10px",scrollbarWidth:"none"}}>
-                    {(messages||[]).map((m,i)=>(
-                      <ChatMessage key={i} m={m} onItemClick={setSelected}/>
-                    ))}
-                    {chatLoading&&(
-                      <div style={{alignSelf:"flex-start",background:C.surface,borderRadius:"18px 18px 18px 4px",padding:"12px 18px",boxShadow:"0 1px 6px rgba(0,0,0,.3)"}}>
-                        <div style={{display:"flex",gap:5,alignItems:"center"}}>
-                          {[0,1,2].map(i=><div key={i} style={{width:6,height:6,borderRadius:"50%",background:C.accent,animation:"pulse 1s infinite",animationDelay:`${i*0.2}s`}}/>)}
-                        </div>
-                      </div>
-                    )}
-                    <div ref={endRef}/>
-                  </div>
-                  <div style={{padding:"12px 0 20px",display:"flex",gap:8,alignItems:"flex-end",borderTop:`1px solid ${C.border}`,flexShrink:0}}>
-                    <textarea ref={inputRef} rows={3} value={input}
-                      onChange={e=>setInput(e.target.value)}
-                      onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send();}}}
-                      placeholder={t.chat_ph}
-                      style={{flex:1,background:C.surface,border:`1px solid ${C.border}`,borderRadius:14,padding:"10px 14px",color:C.text,fontSize:14,fontFamily:SANS,resize:"none",letterSpacing:.2,lineHeight:1.6}}/>
-                    <div style={{display:"flex",flexDirection:"column",gap:6,flexShrink:0,alignSelf:"stretch"}}>
-                      <button onClick={send} disabled={chatLoading} style={{flex:1,background:chatLoading?"transparent":C.accent,border:`1px solid ${chatLoading?C.border:C.accent}`,borderRadius:10,color:chatLoading?C.dim:C.bg,fontFamily:MONO,fontSize:10,letterSpacing:2,padding:"0 20px",cursor:chatLoading?"not-allowed":"pointer",transition:"all .15s",display:"flex",alignItems:"center",justifyContent:"center"}}>GO</button>
-                      <button onClick={clearChat} style={{background:"transparent",border:`1px solid ${C.border}`,borderRadius:8,color:C.dim,fontFamily:MONO,fontSize:9,padding:"7px 10px",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",letterSpacing:1}}>CLR</button>
-                    </div>
-                  </div>
-                </div>
-              )}
+              {desktopRight==="chat" && <ChatPanel/>}
               {desktopRight==="libreria" && (
                 <div style={{display:"flex",flexDirection:"column",flex:1,minHeight:0,overflow:"hidden"}}>
                   <div style={{display:"flex",gap:6,marginBottom:12,flexWrap:"wrap",flexShrink:0}}>
@@ -1579,37 +1650,39 @@ export default function ReelBot() {
   // MOBILE LAYOUT  (< 900px)
   // ════════════════════════════════════════
   return (
-    <div style={{fontFamily:SANS,background:C.bg,minHeight:"100vh",color:C.text,display:"flex",flexDirection:"column",maxWidth:480,margin:"0 auto"}}>
+    <div style={{fontFamily:SANS,background:C.bg,height:"100dvh",color:C.text,display:"flex",flexDirection:"column",maxWidth:480,margin:"0 auto",overflow:"hidden"}}>
       <style>{`
-        @keyframes fadeIn{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:translateY(0)}}
+        @keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+        @keyframes scaleIn{from{opacity:0;transform:scale(.95)}to{opacity:1;transform:scale(1)}}
         @keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
         @keyframes slideDown{from{opacity:0;transform:translate(-50%,-8px)}to{opacity:1;transform:translate(-50%,0)}}
         @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+        @keyframes shimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}
         *::-webkit-scrollbar{display:none}
         input,textarea{transition:border-color .15s;}
         input:focus,textarea:focus{border-color:${C.accent}!important;outline:none;}
       `}</style>
 
       <Notif msg={notif}/>
-      {selected&&<DetailModal item={selected} onClose={()=>setSelected(null)} lang={lang} onStatus={setApiStatus} onAddToLibrary={(it)=>{ applyAction({op:"add",dest:"library",profile:active,title:it.title,type:it.type||"film",genre:it.genre||"",status:"finito",hours:2}); setSelected(null); }}/>}
-      <Header/>
+      {selected&&<DetailModal item={selected} onClose={()=>setSelected(null)} lang={lang} onStatus={setApiStatus} onAddToLibrary={(it)=>{ applyAction({op:"add",dest:"library",profile:active,title:it.title,type:it.type||"film",genre:it.genre||"",status:"finito",hours:2}); }} onAddToWishlist={(it)=>{ applyAction({op:"add",dest:"wishlist",profile:active,title:it.title,type:it.type||"film",genre:it.genre||""}); }}/>}
 
-      {/* MOBILE TABS */}
-      <div style={{display:"flex",borderBottom:`1px solid ${C.border}`,overflowX:"auto",scrollbarWidth:"none"}}>
-        {TABS.map(tb=>tabBtn(tb.id,tb.label))}
+      {/* STICKY HEADER */}
+      <div style={{flexShrink:0}}>
+        <Header/>
+        {/* STICKY TABS */}
+        <div style={{display:"flex",borderBottom:`1px solid ${C.border}`,overflowX:"auto",scrollbarWidth:"none",background:C.bg}}>
+          {TABS.map(tb=>tabBtn(tb.id,tb.label))}
+        </div>
       </div>
 
-      <div style={{flex:1,display:"flex",flexDirection:"column",padding:"14px 16px 0"}}>
-        {tab==="chat"&&(
-          <div style={{display:"flex",flexDirection:"column",flex:1}}>
-            <ChatPanel maxH="52vh"/>
-          </div>
-        )}
-        {tab==="libreria"&&<LibPanel/>}
-        {tab==="wishlist"&&<WishPanel/>}
-        {tab==="vision"&&<VisionPanel/>}
-        {tab==="stats"&&<StatsView library={lib} lang={lang}/>}
-        {tab==="profile"&&<ProfileEditor profiles={profiles} active={active} onSave={savePrefs} t={t}/>}
+      {/* SCROLLABLE CONTENT — fills remaining height */}
+      <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden",padding: tab==="chat" ? "14px 12px 0" : "14px 16px 0"}}>
+        {tab==="chat"&&<ChatPanel/>}
+        {tab==="libreria"&&<div style={{overflowY:"auto",flex:1,scrollbarWidth:"none"}}><LibPanel/></div>}
+        {tab==="wishlist"&&<div style={{overflowY:"auto",flex:1,scrollbarWidth:"none"}}><WishPanel/></div>}
+        {tab==="vision"&&<div style={{overflowY:"auto",flex:1,scrollbarWidth:"none"}}><VisionPanel/></div>}
+        {tab==="stats"&&<div style={{overflowY:"auto",flex:1,scrollbarWidth:"none"}}><StatsView library={lib} lang={lang}/></div>}
+        {tab==="profile"&&<div style={{overflowY:"auto",flex:1,scrollbarWidth:"none"}}><ProfileEditor profiles={profiles} active={active} onSave={savePrefs} t={t}/></div>}
       </div>
     </div>
   );
